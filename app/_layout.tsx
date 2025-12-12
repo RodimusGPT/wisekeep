@@ -1,0 +1,107 @@
+import FontAwesome from '@expo/vector-icons/FontAwesome';
+import { Ionicons } from '@expo/vector-icons';
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { useFonts } from 'expo-font';
+import { Stack, useRouter, useSegments } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
+import { useEffect } from 'react';
+import 'react-native-reanimated';
+
+import { useColorScheme } from '@/components/useColorScheme';
+import { useAppStore } from '@/store';
+import { Colors } from '@/constants/Colors';
+
+export {
+  ErrorBoundary,
+} from 'expo-router';
+
+export const unstable_settings = {
+  initialRouteName: '(tabs)',
+};
+
+SplashScreen.preventAutoHideAsync();
+
+export default function RootLayout() {
+  const [loaded, error] = useFonts({
+    SpaceMono: require('../assets/fonts/SpaceMono-Regular.ttf'),
+    ...FontAwesome.font,
+  });
+
+  useEffect(() => {
+    if (error) throw error;
+  }, [error]);
+
+  useEffect(() => {
+    if (loaded) {
+      SplashScreen.hideAsync();
+    }
+  }, [loaded]);
+
+  if (!loaded) {
+    return null;
+  }
+
+  return <RootLayoutNav />;
+}
+
+function RootLayoutNav() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const router = useRouter();
+  const segments = useSegments();
+  const { settings } = useAppStore();
+
+  // Redirect to onboarding if not completed
+  useEffect(() => {
+    const inOnboarding = segments[0] === 'onboarding';
+
+    if (!settings.hasCompletedOnboarding && !inOnboarding) {
+      router.replace('/onboarding');
+    }
+  }, [settings.hasCompletedOnboarding, segments]);
+
+  // Custom theme with WiseKeep colors
+  const lightTheme = {
+    ...DefaultTheme,
+    colors: {
+      ...DefaultTheme.colors,
+      primary: Colors.primary,
+      background: Colors.background,
+      card: Colors.card,
+      text: Colors.text,
+      border: Colors.border,
+    },
+  };
+
+  const darkTheme = {
+    ...DarkTheme,
+    colors: {
+      ...DarkTheme.colors,
+      primary: Colors.primaryLight,
+      background: Colors.backgroundDark,
+      card: Colors.cardDark,
+      text: Colors.textDark,
+      border: Colors.borderDark,
+    },
+  };
+
+  return (
+    <ThemeProvider value={isDark ? darkTheme : lightTheme}>
+      <Stack>
+        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="recording/[id]"
+          options={{
+            headerTitle: '',
+            headerBackTitle: '',
+            headerTintColor: Colors.primary,
+            headerStyle: {
+              backgroundColor: isDark ? Colors.backgroundDark : Colors.background,
+            },
+          }}
+        />
+      </Stack>
+    </ThemeProvider>
+  );
+}
