@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,13 @@ import {
   useColorScheme,
   ScrollView,
   Alert,
+  Animated,
+  Easing,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n, useRecording } from '@/hooks';
+import { useI18n, useRecording, useAuth } from '@/hooks';
 import {
   RecordButton,
   Timer,
@@ -19,7 +21,13 @@ import {
   RecordingCard,
   BigButton,
 } from '@/components/ui';
-import { getFontSize, Recording } from '@/types';
+import { getFontSize, Recording, NoteLine } from '@/types';
+import {
+  uploadAudioChunked,
+  processRecording as processRecordingApi,
+  fetchRecordingById,
+  saveRecording as saveRecordingToDb,
+} from '@/services/supabase';
 
 export default function HomeScreen() {
   const colorScheme = useColorScheme();
@@ -28,6 +36,7 @@ export default function HomeScreen() {
 
   const { t } = useI18n();
   const { settings, recordings, setCurrentRecordingId, updateRecording } = useAppStore();
+  const { user } = useAuth();
   const textSize = settings.textSize;
 
   const {
@@ -41,6 +50,36 @@ export default function HomeScreen() {
   } = useRecording();
 
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const spinAnim = useRef(new Animated.Value(0)).current;
+
+  // Spinning animation for processing indicator
+  useEffect(() => {
+    if (processingId) {
+      // Start spinning animation
+      const spin = Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      spin.start();
+
+      // Start elapsed time counter
+      setElapsedTime(0);
+      const timer = setInterval(() => {
+        setElapsedTime((prev) => prev + 1);
+      }, 1000);
+
+      return () => {
+        spin.stop();
+        spinAnim.setValue(0);
+        clearInterval(timer);
+      };
+    }
+  }, [processingId]);
 
   const backgroundColor = isDark ? Colors.backgroundDark : Colors.background;
   const textColor = isDark ? Colors.textDark : Colors.text;
@@ -50,6 +89,7 @@ export default function HomeScreen() {
   const recentRecordings = recordings.slice(0, 3);
 
   const handleRecordPress = async () => {
+    console.log('handleRecordPress called, isRecording:', isRecording);
     try {
       if (isRecording) {
         // Stop recording
@@ -59,8 +99,8 @@ export default function HomeScreen() {
           setProcessingId(recording.id);
           setCurrentRecordingId(recording.id);
 
-          // Simulate processing (in real app, this would call the API)
-          simulateProcessing(recording.id);
+          // Process with Supabase Edge Function (handles chunking automatically)
+          processRecording(recording.id, recording.audioUri, recording.duration);
         }
       } else {
         // Start recording
@@ -82,60 +122,138 @@ export default function HomeScreen() {
     }
   };
 
-  // Simulate processing for demo purposes
-  // In production, this would be handled by Supabase Edge Functions
-  const simulateProcessing = async (recordingId: string) => {
-    // Simulate transcription delay
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+  // Process recording with Supabase Edge Function (handles chunking automatically)
+  const processRecording = async (recordingId: string, audioUri: string, durationSeconds: number) => {
+    console.log('processRecording started for:', recordingId);
 
-    // Add mock notes
-    const mockNotes = [
-      {
-        id: '1',
-        timestamp: 0,
-        text: '這是一段示範文字。這是錄音的筆記內容。',
-        speaker: '1',
-      },
-      {
-        id: '2',
-        timestamp: 5000,
-        text: 'This is sample text. These are the notes from the recording.',
-        speaker: '1',
-      },
-      {
-        id: '3',
-        timestamp: 10000,
-        text: '您可以點擊任何一行來聽取該段錄音。',
-        speaker: '2',
-      },
-    ];
+    if (!user) {
+      console.error('No user logged in');
+      updateRecording(recordingId, {
+        status: 'ready',
+        notes: [{ id: '1', timestamp: 0, text: '請先登入' }],
+        summary: ['尚未登入，請稍後重試。'],
+      });
+      setProcessingId(null);
+      return;
+    }
 
-    updateRecording(recordingId, {
-      status: 'processing_summary',
-      notes: mockNotes,
-    });
+    try {
+      // Step 1: Fetch the audio blob
+      console.log('Fetching audio blob from:', audioUri);
+      const response = await fetch(audioUri);
+      const audioBlob = await response.blob();
+      console.log('Audio blob size:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
 
-    // Simulate summarization delay
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+      // Step 2: Upload with automatic chunking
+      // Use authUserId for storage paths (matches Supabase Storage RLS policy using auth.uid())
+      console.log('Uploading audio (with chunking if needed)...');
+      const { chunks, needsChunking } = await uploadAudioChunked(
+        user.authUserId,
+        recordingId,
+        audioBlob,
+        durationSeconds
+      );
+      console.log(`Upload complete: ${chunks.length} chunk(s), chunking ${needsChunking ? 'used' : 'not needed'}`);
 
-    // Add mock summary
-    const mockSummary = [
-      '這是錄音的第一個重點摘要。',
-      '這是第二個重要的要點。',
-      '這是第三個需要記住的事項。',
-    ];
+      // Step 3: Save recording to database (so Edge Function can update it)
+      console.log('Saving recording to database...');
+      await saveRecordingToDb({
+        id: recordingId,
+        user_id: user.id,
+        device_id: user.deviceId || 'unknown',
+        duration: durationSeconds,
+        audio_url: chunks[0].url, // Main audio URL (first chunk or single file)
+        status: 'processing_notes',
+        language: settings.language,
+      });
+      console.log('Recording saved to database');
 
-    updateRecording(recordingId, {
-      status: 'ready',
-      summary: mockSummary,
-    });
+      // Step 4: Call Edge Function to process
+      console.log('Starting transcription and summarization...');
+      const result = await processRecordingApi(
+        recordingId,
+        user.id,
+        chunks,
+        settings.language,
+        durationSeconds
+      );
 
-    setProcessingId(null);
+      if (!result.success) {
+        throw new Error(result.error || 'Processing failed');
+      }
 
-    // Check if this is the first recording
-    if (!settings.hasSeenFirstRecordingEducation && recordings.length === 1) {
-      // Navigate to the recording detail
-      router.push(`/recording/${recordingId}`);
+      console.log('Processing started, polling for updates...');
+
+      // Poll for recording updates (more reliable than real-time subscriptions)
+      const pollForUpdates = async () => {
+        const maxAttempts = 60; // Poll for up to 2 minutes (60 * 2 seconds)
+        let attempts = 0;
+
+        const checkStatus = async () => {
+          attempts++;
+          console.log(`Polling for recording status (attempt ${attempts})...`);
+
+          try {
+            const dbRecording = await fetchRecordingById(recordingId);
+
+            if (dbRecording) {
+              console.log('Recording status from DB:', dbRecording.status);
+
+              // Update local state with database values
+              updateRecording(recordingId, {
+                status: dbRecording.status,
+                notes: dbRecording.notes as NoteLine[] || [],
+                summary: dbRecording.summary as string[] || [],
+              });
+
+              // Check if processing is complete
+              if (dbRecording.status === 'ready' || dbRecording.status === 'error') {
+                console.log('Processing finished with status:', dbRecording.status);
+                setProcessingId(null);
+
+                // Navigate to recording detail if first recording
+                if (!settings.hasSeenFirstRecordingEducation && recordings.length === 1) {
+                  router.push(`/recording/${recordingId}`);
+                }
+                return; // Stop polling
+              }
+            }
+
+            // Continue polling if not done and under max attempts
+            if (attempts < maxAttempts) {
+              setTimeout(checkStatus, 2000); // Poll every 2 seconds
+            } else {
+              console.log('Polling timeout - stopping');
+              setProcessingId(null);
+            }
+          } catch (error) {
+            console.error('Error polling for updates:', error);
+            if (attempts < maxAttempts) {
+              setTimeout(checkStatus, 2000);
+            }
+          }
+        };
+
+        // Start polling after a short delay (give Edge Function time to start)
+        setTimeout(checkStatus, 1000);
+      };
+
+      pollForUpdates();
+
+    } catch (error) {
+      console.error('Processing error:', error);
+
+      // Update status to show error
+      updateRecording(recordingId, {
+        status: 'ready',
+        notes: [{
+          id: '1',
+          timestamp: 0,
+          text: `處理錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`,
+        }],
+        summary: ['處理過程中發生錯誤，請重試。'],
+      });
+      setProcessingId(null);
     }
   };
 
@@ -181,11 +299,29 @@ export default function HomeScreen() {
     const processingRecording = recordings.find((r) => r.id === processingId);
     const isTranscribing = processingRecording?.status === 'processing_notes';
 
+    // Format elapsed time as MM:SS
+    const formatElapsed = (seconds: number) => {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    };
+
+    // Interpolate rotation
+    const spin = spinAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0deg', '360deg'],
+    });
+
     return (
       <SafeAreaView style={[styles.container, { backgroundColor }]}>
         <View style={styles.processingView}>
           <View style={styles.processingIndicator}>
-            <View style={styles.spinner} />
+            <Animated.View
+              style={[
+                styles.spinner,
+                { transform: [{ rotate: spin }] },
+              ]}
+            />
           </View>
 
           <Text
@@ -204,6 +340,15 @@ export default function HomeScreen() {
             ]}
           >
             {isTranscribing ? t.takingNotes : t.findingKeyPoints}
+          </Text>
+
+          <Text
+            style={[
+              styles.elapsedTime,
+              { color: textColor, fontSize: getFontSize('header', textSize) },
+            ]}
+          >
+            {formatElapsed(elapsedTime)}
           </Text>
 
           <Text
@@ -402,7 +547,12 @@ const styles = StyleSheet.create({
   },
   processingStep: {
     fontWeight: '600',
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  elapsedTime: {
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+    marginBottom: 16,
   },
   processingHint: {
     textAlign: 'center',

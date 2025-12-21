@@ -9,6 +9,7 @@ export interface NoteLine {
 
 export interface Recording {
   id: string;
+  label?: string; // User-defined label for easy identification
   createdAt: string; // ISO date string
   duration: number; // in seconds
   audioUri: string; // local file path

@@ -42,6 +42,7 @@ export interface Translations {
   notesHeader: string;
   tapNotesForMore: string;
   speaker: string;
+  addLabel: string;
   edit: string;
   share: string;
   delete: string;
@@ -69,6 +70,12 @@ export interface Translations {
   shareAudio: string;
   copyText: string;
   copied: string;
+  noSummaryToShare: string;
+  noNotesToShare: string;
+  failedToCopy: string;
+  audioSharingNotAvailableWeb: string;
+  sharingNotAvailable: string;
+  failedToShareAudio: string;
 
   // Settings
   settings: string;
@@ -118,6 +125,18 @@ export interface Translations {
   hours: string;
   minutes: string;
   seconds: string;
+
+  // Payments
+  upgradeToPremium: string;
+  restorePurchases: string;
+  unlimitedRecordings: string;
+  purchaseRestored: string;
+  noPurchasesToRestore: string;
+  purchaseFailed: string;
+
+  // Support
+  supportCode: string;
+  codeCopied: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -163,6 +182,7 @@ export const translations: Record<Language, Translations> = {
     notesHeader: '筆記',
     tapNotesForMore: '點擊「筆記」查看更多內容',
     speaker: '說話者',
+    addLabel: '點擊添加標籤',
     edit: '編輯',
     share: '分享',
     delete: '刪除',
@@ -184,12 +204,18 @@ export const translations: Record<Language, Translations> = {
     processingStatus: '處理中',
 
     // Sharing
-    shareWithFamily: '分享給家人',
-    shareSummary: '分享摘要',
-    shareNotes: '分享筆記',
+    shareWithFamily: '分享內容',
+    shareSummary: '拷貝摘要內容',
+    shareNotes: '拷貝筆記內容',
     shareAudio: '分享錄音',
     copyText: '複製文字',
     copied: '已複製',
+    noSummaryToShare: '沒有摘要可以分享',
+    noNotesToShare: '沒有筆記可以分享',
+    failedToCopy: '複製失敗',
+    audioSharingNotAvailableWeb: '網頁版無法分享錄音，請使用手機應用程式',
+    sharingNotAvailable: '無法分享',
+    failedToShareAudio: '分享錄音失敗',
 
     // Settings
     settings: '設定',
@@ -239,6 +265,18 @@ export const translations: Record<Language, Translations> = {
     hours: '小時',
     minutes: '分鐘',
     seconds: '秒',
+
+    // Payments
+    upgradeToPremium: '升級無限制',
+    restorePurchases: '恢復購買',
+    unlimitedRecordings: '無限錄音時間',
+    purchaseRestored: '購買已恢復',
+    noPurchasesToRestore: '沒有購買記錄可恢復',
+    purchaseFailed: '購買失敗，請重試',
+
+    // Support
+    supportCode: '支援代碼',
+    codeCopied: '代碼已複製',
   },
 
   'en': {
@@ -283,6 +321,7 @@ export const translations: Record<Language, Translations> = {
     notesHeader: 'Notes',
     tapNotesForMore: 'Tap "Notes" for more details',
     speaker: 'Speaker',
+    addLabel: 'Tap to add label',
     edit: 'Edit',
     share: 'Share',
     delete: 'Delete',
@@ -310,6 +349,12 @@ export const translations: Record<Language, Translations> = {
     shareAudio: 'Share Audio',
     copyText: 'Copy Text',
     copied: 'Copied',
+    noSummaryToShare: 'No summary to share',
+    noNotesToShare: 'No notes to share',
+    failedToCopy: 'Failed to copy',
+    audioSharingNotAvailableWeb: 'Audio sharing is not available on web. Please use the mobile app.',
+    sharingNotAvailable: 'Sharing not available',
+    failedToShareAudio: 'Failed to share audio',
 
     // Settings
     settings: 'Settings',
@@ -359,5 +404,17 @@ export const translations: Record<Language, Translations> = {
     hours: 'hours',
     minutes: 'minutes',
     seconds: 'seconds',
+
+    // Payments
+    upgradeToPremium: 'Upgrade to Unlimited',
+    restorePurchases: 'Restore Purchases',
+    unlimitedRecordings: 'Unlimited Recording Time',
+    purchaseRestored: 'Purchase Restored',
+    noPurchasesToRestore: 'No purchases to restore',
+    purchaseFailed: 'Purchase failed, please try again',
+
+    // Support
+    supportCode: 'Support Code',
+    codeCopied: 'Code copied',
   },
 };

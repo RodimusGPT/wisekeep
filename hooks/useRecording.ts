@@ -1,10 +1,15 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { Platform } from 'react-native';
 import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
-import { v4 as uuidv4 } from 'uuid';
+import { generateUUID } from '@/utils/uuid';
 import { useAppStore } from '@/store';
 import { Recording } from '@/types';
+
+// Web-specific types
+type WebMediaRecorder = MediaRecorder;
+type WebMediaStream = MediaStream;
 
 interface UseRecordingReturn {
   isRecording: boolean;
@@ -23,6 +28,9 @@ export function useRecording(): UseRecordingReturn {
   const [hasPermission, setHasPermission] = useState(false);
 
   const recordingRef = useRef<Audio.Recording | null>(null);
+  const webRecorderRef = useRef<WebMediaRecorder | null>(null);
+  const webStreamRef = useRef<WebMediaStream | null>(null);
+  const webChunksRef = useRef<Blob[]>([]);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
 
@@ -34,6 +42,12 @@ export function useRecording(): UseRecordingReturn {
   }, []);
 
   const checkPermission = async () => {
+    if (Platform.OS === 'web') {
+      // Web permission is checked when we actually request the microphone
+      setHasPermission(true);
+      setMicrophonePermission(true);
+      return true;
+    }
     const { status } = await Audio.getPermissionsAsync();
     const granted = status === 'granted';
     setHasPermission(granted);
@@ -43,6 +57,14 @@ export function useRecording(): UseRecordingReturn {
 
   const requestPermission = async (): Promise<boolean> => {
     try {
+      if (Platform.OS === 'web') {
+        // Request microphone access on web
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop()); // Stop immediately, just checking
+        setHasPermission(true);
+        setMicrophonePermission(true);
+        return true;
+      }
       const { status } = await Audio.requestPermissionsAsync();
       const granted = status === 'granted';
       setHasPermission(granted);
@@ -64,6 +86,38 @@ export function useRecording(): UseRecordingReturn {
         }
       }
 
+      // Web-specific recording using MediaRecorder API
+      if (Platform.OS === 'web') {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        webStreamRef.current = stream;
+        webChunksRef.current = [];
+
+        const mediaRecorder = new MediaRecorder(stream, {
+          mimeType: 'audio/webm',
+        });
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            webChunksRef.current.push(event.data);
+          }
+        };
+
+        mediaRecorder.start(1000); // Collect data every second
+        webRecorderRef.current = mediaRecorder;
+
+        // Start duration timer
+        startTimeRef.current = Date.now();
+        setDuration(0);
+        durationIntervalRef.current = setInterval(() => {
+          const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+          setDuration(elapsed);
+        }, 100);
+
+        setIsRecording(true);
+        return;
+      }
+
+      // Native recording using expo-av
       // Configure audio mode for recording
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
@@ -138,14 +192,71 @@ export function useRecording(): UseRecordingReturn {
 
   const stopRecording = useCallback(async (): Promise<Recording | null> => {
     try {
-      if (!recordingRef.current) {
-        return null;
-      }
-
       // Stop duration timer
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
         durationIntervalRef.current = null;
+      }
+
+      // Calculate final duration
+      const finalDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      const recordingId = generateUUID();
+
+      // Web-specific stop recording
+      if (Platform.OS === 'web') {
+        if (!webRecorderRef.current) {
+          return null;
+        }
+
+        // Stop the MediaRecorder
+        return new Promise((resolve, reject) => {
+          const mediaRecorder = webRecorderRef.current!;
+
+          mediaRecorder.onstop = () => {
+            // Stop all tracks
+            if (webStreamRef.current) {
+              webStreamRef.current.getTracks().forEach(track => track.stop());
+              webStreamRef.current = null;
+            }
+
+            // Create blob from chunks
+            const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
+            const audioUri = URL.createObjectURL(blob);
+
+            // Create recording object
+            const newRecording: Recording = {
+              id: recordingId,
+              createdAt: new Date().toISOString(),
+              duration: finalDuration,
+              audioUri: audioUri,
+              status: 'processing_notes',
+              language: settings.language,
+            };
+
+            // Add to store
+            addRecording(newRecording);
+
+            // Reset state
+            webRecorderRef.current = null;
+            webChunksRef.current = [];
+            setIsRecording(false);
+            setDuration(0);
+            setMetering(0);
+
+            resolve(newRecording);
+          };
+
+          mediaRecorder.onerror = (event) => {
+            reject(new Error('MediaRecorder error'));
+          };
+
+          mediaRecorder.stop();
+        });
+      }
+
+      // Native recording stop
+      if (!recordingRef.current) {
+        return null;
       }
 
       const recording = recordingRef.current;
@@ -167,11 +278,7 @@ export function useRecording(): UseRecordingReturn {
         throw new Error('No recording URI');
       }
 
-      // Calculate final duration
-      const finalDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-
       // Move file to permanent location
-      const recordingId = uuidv4();
       const permanentUri = `${FileSystem.documentDirectory}recordings/${recordingId}.m4a`;
 
       // Ensure directory exists
@@ -224,6 +331,14 @@ export function useRecording(): UseRecordingReturn {
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
+      // Web cleanup
+      if (webRecorderRef.current && webRecorderRef.current.state !== 'inactive') {
+        webRecorderRef.current.stop();
+      }
+      if (webStreamRef.current) {
+        webStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+      // Native cleanup
       if (recordingRef.current) {
         recordingRef.current.stopAndUnloadAsync().catch(console.error);
       }

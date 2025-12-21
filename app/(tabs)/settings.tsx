@@ -9,11 +9,15 @@ import {
   Modal,
   TouchableOpacity,
   TouchableWithoutFeedback,
+  Platform,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n } from '@/hooks';
+import { useI18n, useAuth, usePurchases } from '@/hooks';
 import { SettingsItem, BigButton } from '@/components/ui';
 import { getFontSize, TextSize } from '@/types';
 import { Language } from '@/i18n/translations';
@@ -24,6 +28,14 @@ export default function SettingsScreen() {
 
   const { t, language, setLanguage } = useI18n();
   const { settings, setTextSize } = useAppStore();
+  const { user, usage, getRemainingMinutes } = useAuth();
+  const {
+    isPurchasesSupported,
+    isProcessing: isPurchaseProcessing,
+    showPaywall,
+    restorePurchases,
+    isPremium,
+  } = usePurchases();
   const textSize = settings.textSize;
 
   const [showLanguageModal, setShowLanguageModal] = useState(false);
@@ -34,6 +46,20 @@ export default function SettingsScreen() {
   const textColor = isDark ? Colors.textDark : Colors.text;
   const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
   const cardBackground = isDark ? Colors.cardDark : Colors.card;
+
+  // Get support code from user profile (stored in database)
+  const supportCode = user?.supportCode ?? null;
+
+  // Copy support code to clipboard
+  const handleCopySupportCode = async () => {
+    if (!supportCode) return;
+    try {
+      await Clipboard.setStringAsync(supportCode);
+      Alert.alert('', t.codeCopied);
+    } catch (error) {
+      console.error('Failed to copy support code:', error);
+    }
+  };
 
   // Language display text
   const getLanguageDisplay = (lang: Language): string => {
@@ -62,6 +88,61 @@ export default function SettingsScreen() {
     setShowTextSizeModal(false);
   };
 
+  // Handle upgrade button press
+  const handleUpgrade = async () => {
+    try {
+      await showPaywall();
+    } catch (error) {
+      console.error('Error showing paywall:', error);
+      Alert.alert(
+        language === 'zh-TW' ? '錯誤' : 'Error',
+        t.purchaseFailed
+      );
+    }
+  };
+
+  // Handle restore purchases
+  const handleRestorePurchases = async () => {
+    try {
+      const restored = await restorePurchases();
+      Alert.alert(
+        '',
+        restored ? t.purchaseRestored : t.noPurchasesToRestore
+      );
+    } catch (error) {
+      console.error('Error restoring purchases:', error);
+      Alert.alert(
+        language === 'zh-TW' ? '錯誤' : 'Error',
+        t.purchaseFailed
+      );
+    }
+  };
+
+  // Get tier display text
+  const getTierDisplay = (): string => {
+    if (!user) return language === 'zh-TW' ? '載入中...' : 'Loading...';
+    switch (user.tier) {
+      case 'vip':
+        return 'VIP';
+      case 'premium':
+        return language === 'zh-TW' ? '高級會員' : 'Premium';
+      default:
+        return language === 'zh-TW' ? '免費版' : 'Free';
+    }
+  };
+
+  // Get usage display text
+  const getUsageDisplay = (): string => {
+    if (!usage) return '';
+    if (usage.isUnlimited) {
+      return language === 'zh-TW' ? '無限制' : 'Unlimited';
+    }
+    const remaining = getRemainingMinutes();
+    return language === 'zh-TW'
+      ? `剩餘 ${remaining.toFixed(1)} 分鐘`
+      : `${remaining.toFixed(1)} min remaining`;
+  };
+
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]}>
       {/* Header */}
@@ -77,6 +158,92 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Subscription Section */}
+        <View style={[styles.subscriptionCard, { backgroundColor: cardBackground }]}>
+          <View style={styles.subscriptionHeader}>
+            <View style={[
+              styles.tierBadge,
+              user?.tier === 'vip' && styles.tierBadgeVip,
+              user?.tier === 'premium' && styles.tierBadgePremium,
+            ]}>
+              <Text style={styles.tierBadgeText}>{getTierDisplay()}</Text>
+            </View>
+            <Text style={[styles.usageText, { color: secondaryColor, fontSize: getFontSize('body', textSize) }]}>
+              {getUsageDisplay()}
+            </Text>
+          </View>
+
+          {/* Show usage bar for free tier */}
+          {usage && !usage.isUnlimited && (
+            <View style={styles.usageBarContainer}>
+              <View style={styles.usageBarBackground}>
+                <View
+                  style={[
+                    styles.usageBarFill,
+                    { width: `${Math.min(100, (usage.minutesUsed / usage.minutesLimit) * 100)}%` },
+                  ]}
+                />
+              </View>
+              <Text style={[styles.usageDetails, { color: secondaryColor, fontSize: getFontSize('small', textSize) }]}>
+                {usage.minutesUsed.toFixed(1)} / {usage.minutesLimit} {language === 'zh-TW' ? '分鐘' : 'min'}
+              </Text>
+            </View>
+          )}
+
+          {/* Upgrade button - only show on mobile for free tier users */}
+          {isPurchasesSupported && !isPremium && user?.tier === 'free' && (
+            <TouchableOpacity
+              style={styles.upgradeButton}
+              onPress={handleUpgrade}
+              disabled={isPurchaseProcessing}
+            >
+              {isPurchaseProcessing ? (
+                <ActivityIndicator size="small" color="#FFFFFF" />
+              ) : (
+                <>
+                  <Ionicons name="star" size={20} color="#FFFFFF" />
+                  <Text style={[styles.upgradeButtonText, { fontSize: getFontSize('body', textSize) }]}>
+                    {t.upgradeToPremium}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          )}
+
+          {/* Restore purchases button - only show on mobile */}
+          {isPurchasesSupported && (
+            <TouchableOpacity
+              style={styles.restoreButton}
+              onPress={handleRestorePurchases}
+              disabled={isPurchaseProcessing}
+            >
+              <Text style={[styles.restoreButtonText, { color: Colors.primary, fontSize: getFontSize('small', textSize) }]}>
+                {t.restorePurchases}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Support Code - tap to copy */}
+          {supportCode && (
+            <TouchableOpacity
+              style={styles.supportCodeContainer}
+              onPress={handleCopySupportCode}
+              activeOpacity={0.7}
+            >
+              <Text style={[styles.supportCodeLabel, { color: secondaryColor, fontSize: getFontSize('small', textSize) }]}>
+                {t.supportCode}
+              </Text>
+              <View style={styles.supportCodeRow}>
+                <Text style={[styles.supportCodeText, { color: textColor, fontSize: getFontSize('body', textSize) }]}>
+                  {supportCode}
+                </Text>
+                <Ionicons name="copy-outline" size={16} color={secondaryColor} />
+              </View>
+            </TouchableOpacity>
+          )}
+
+        </View>
+
         {/* Language */}
         <SettingsItem
           icon="language"
@@ -319,6 +486,7 @@ export default function SettingsScreen() {
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
     </SafeAreaView>
   );
 }
@@ -433,5 +601,99 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 28,
     marginBottom: 24,
+  },
+
+  // Subscription card
+  subscriptionCard: {
+    marginHorizontal: 20,
+    marginBottom: 24,
+    borderRadius: 16,
+    padding: 20,
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  tierBadge: {
+    backgroundColor: Colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  tierBadgeVip: {
+    backgroundColor: '#FFD700',
+  },
+  tierBadgePremium: {
+    backgroundColor: Colors.primary,
+  },
+  tierBadgeText: {
+    color: '#000000',
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  usageText: {
+    fontWeight: '500',
+  },
+  usageBarContainer: {
+    marginBottom: 16,
+  },
+  usageBarBackground: {
+    height: 8,
+    backgroundColor: 'rgba(128, 128, 128, 0.2)',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  usageBarFill: {
+    height: '100%',
+    backgroundColor: Colors.primary,
+    borderRadius: 4,
+  },
+  usageDetails: {
+    textAlign: 'right',
+  },
+  upgradeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 8,
+    gap: 8,
+  },
+  upgradeButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+  },
+  restoreButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: 8,
+  },
+  restoreButtonText: {
+    fontWeight: '500',
+  },
+  supportCodeContainer: {
+    alignItems: 'center',
+    paddingTop: 16,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(128, 128, 128, 0.2)',
+  },
+  supportCodeLabel: {
+    marginBottom: 4,
+  },
+  supportCodeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  supportCodeText: {
+    fontWeight: '700',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    letterSpacing: 1,
   },
 });

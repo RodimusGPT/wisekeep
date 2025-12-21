@@ -15,7 +15,7 @@ import { getFontSize } from '@/types';
 interface BigButtonProps {
   title: string;
   onPress: () => void;
-  variant?: 'primary' | 'secondary' | 'danger' | 'success';
+  variant?: 'primary' | 'secondary' | 'danger' | 'success' | 'playback';
   disabled?: boolean;
   style?: ViewStyle;
   textStyle?: TextStyle;
@@ -47,6 +47,8 @@ export function BigButton({
     switch (variant) {
       case 'primary':
         return Colors.primary;
+      case 'playback':
+        return Colors.playback; // Blue for playback-related actions
       case 'secondary':
         return isDark ? Colors.backgroundSecondaryDark : Colors.backgroundSecondary;
       case 'danger':

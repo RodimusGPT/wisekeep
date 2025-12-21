@@ -1,9 +1,51 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { generateUUID } from '@/utils/uuid';
 import { Recording, AppSettings, TextSize } from '@/types';
 import { Language } from '@/i18n/translations';
-import * as Crypto from 'expo-crypto';
+
+// User tier types
+export type UserTier = 'free' | 'vip' | 'premium';
+
+// User profile from Supabase
+export interface UserProfile {
+  id: string;
+  authUserId: string;
+  tier: UserTier;
+  supportCode: string | null;
+  inviteCodeUsed: string | null;
+  subscriptionStatus: string | null;
+  subscriptionExpiresAt: string | null;
+}
+
+// Usage information
+export interface UsageInfo {
+  tier: UserTier;
+  allowed: boolean;
+  minutesUsed: number;
+  minutesLimit: number;
+  minutesRemaining: number;
+  periodType: string;
+  isUnlimited: boolean;
+}
+
+// App configuration from server
+export interface AppConfig {
+  freeTier: {
+    minutes: number;
+    period: string;
+  };
+  premium: {
+    monthlyPriceTwd: number;
+    yearlyPriceTwd: number;
+    yearlySavingsTwd: number;
+  };
+  limits: {
+    maxRecordingDurationMinutes: number;
+    maxAudioFileSizeMb: number;
+  };
+}
 
 interface AppState {
   // Settings
@@ -13,6 +55,21 @@ interface AppState {
   completeOnboarding: () => void;
   setMicrophonePermission: (granted: boolean) => void;
   markFirstRecordingEducationSeen: () => void;
+
+  // User Authentication
+  user: UserProfile | null;
+  isAuthLoading: boolean;
+  setUser: (user: UserProfile | null) => void;
+  setAuthLoading: (loading: boolean) => void;
+  updateUserTier: (tier: UserTier) => void;
+
+  // Usage Tracking
+  usage: UsageInfo | null;
+  setUsage: (usage: UsageInfo | null) => void;
+
+  // App Config (from server)
+  appConfig: AppConfig | null;
+  setAppConfig: (config: AppConfig | null) => void;
 
   // Recordings
   recordings: Recording[];
@@ -65,6 +122,27 @@ export const useAppStore = create<AppState>()(
           settings: { ...state.settings, hasSeenFirstRecordingEducation: true },
         })),
 
+      // User Authentication
+      user: null,
+      isAuthLoading: true,
+
+      setUser: (user) => set({ user }),
+
+      setAuthLoading: (isAuthLoading) => set({ isAuthLoading }),
+
+      updateUserTier: (tier) =>
+        set((state) => ({
+          user: state.user ? { ...state.user, tier } : null,
+        })),
+
+      // Usage Tracking
+      usage: null,
+      setUsage: (usage) => set({ usage }),
+
+      // App Config
+      appConfig: null,
+      setAppConfig: (appConfig) => set({ appConfig }),
+
       // Recordings
       recordings: [],
       currentRecordingId: null,
@@ -101,7 +179,7 @@ export const useAppStore = create<AppState>()(
           return state.deviceId;
         }
 
-        const newDeviceId = Crypto.randomUUID();
+        const newDeviceId = generateUUID();
         set({ deviceId: newDeviceId });
         return newDeviceId;
       },
@@ -113,6 +191,7 @@ export const useAppStore = create<AppState>()(
         settings: state.settings,
         recordings: state.recordings,
         deviceId: state.deviceId,
+        user: state.user, // Persist user profile for offline access
       }),
     }
   )

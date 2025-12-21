@@ -109,13 +109,26 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
       onPress={handlePress}
       activeOpacity={0.7}
       accessibilityRole="button"
-      accessibilityLabel={`Recording from ${formatDate(recording.createdAt)}, ${formatDuration(recording.duration)}`}
+      accessibilityLabel={`${recording.label || 'Recording'} from ${formatDate(recording.createdAt)}, ${formatDuration(recording.duration)}`}
     >
+      {/* Label if exists */}
+      {recording.label && (
+        <Text
+          style={[
+            styles.label,
+            { color: textColor, fontSize: getFontSize('bodyLarge', textSize) },
+          ]}
+          numberOfLines={1}
+        >
+          {recording.label}
+        </Text>
+      )}
+
       <View style={styles.header}>
         <Text
           style={[
             styles.date,
-            { color: textColor, fontSize: getFontSize('bodyLarge', textSize) },
+            { color: secondaryColor, fontSize: getFontSize('body', textSize) },
           ]}
         >
           {formatDate(recording.createdAt)}
@@ -199,6 +212,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     marginBottom: 12,
+  },
+  label: {
+    fontWeight: '700',
+    marginBottom: 4,
   },
   header: {
     flexDirection: 'row',

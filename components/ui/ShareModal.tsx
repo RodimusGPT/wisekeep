@@ -6,12 +6,14 @@ import {
   StyleSheet,
   useColorScheme,
   TouchableWithoutFeedback,
+  Platform,
+  Alert,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Sharing from 'expo-sharing';
 import * as Clipboard from 'expo-clipboard';
 import { Colors } from '@/constants/Colors';
+
 import { useAppStore } from '@/store';
 import { useI18n } from '@/hooks';
 import { Recording, getFontSize } from '@/types';
@@ -48,40 +50,94 @@ export function ShareModal({ visible, recording, onClose, onCopied }: ShareModal
     }).join('\n\n');
   };
 
-  const handleShareSummary = async () => {
+  // Cross-platform clipboard copy
+  const copyToClipboard = async (text: string): Promise<boolean> => {
     try {
-      const text = getSummaryText();
-      await Clipboard.setStringAsync(text);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onCopied?.();
-      onClose();
+      if (Platform.OS === 'web') {
+        // Use browser's native Clipboard API on web
+        await navigator.clipboard.writeText(text);
+        return true;
+      } else {
+        // Use expo-clipboard on native
+        await Clipboard.setStringAsync(text);
+        return true;
+      }
     } catch (error) {
-      console.error('Failed to copy summary:', error);
+      console.error('Clipboard copy failed:', error);
+      return false;
+    }
+  };
+
+  // Cross-platform alert helper
+  const showAlert = (message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(message);
+    } else {
+      Alert.alert('', message);
+    }
+  };
+
+  const handleShareSummary = async () => {
+    const text = getSummaryText();
+    if (!text) {
+      showAlert(t.noSummaryToShare);
+      return;
+    }
+    const success = await copyToClipboard(text);
+    if (success) {
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+      onClose();
+      showAlert(t.copied);
+    } else {
+      showAlert(t.failedToCopy);
     }
   };
 
   const handleShareNotes = async () => {
-    try {
-      const text = getNotesText();
-      await Clipboard.setStringAsync(text);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      onCopied?.();
+    const text = getNotesText();
+    if (!text) {
+      showAlert(t.noNotesToShare);
+      return;
+    }
+    const success = await copyToClipboard(text);
+    if (success) {
+      if (Platform.OS !== 'web') {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
       onClose();
-    } catch (error) {
-      console.error('Failed to copy notes:', error);
+      showAlert(t.copied);
+    } else {
+      showAlert(t.failedToCopy);
     }
   };
 
   const handleShareAudio = async () => {
+    // Audio file sharing doesn't work on web - local file URIs aren't valid
+    if (Platform.OS === 'web') {
+      onClose();
+      showAlert(t.audioSharingNotAvailableWeb);
+      return;
+    }
+
     try {
       const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(recording.audioUri);
+      if (isAvailable && recording.audioUri) {
+        await Sharing.shareAsync(recording.audioUri, {
+          mimeType: 'audio/m4a',
+          dialogTitle: t.shareAudio,
+        });
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        onClose();
+      } else {
+        onClose();
+        showAlert(t.sharingNotAvailable);
       }
-      onClose();
     } catch (error) {
       console.error('Failed to share audio:', error);
+      onClose();
+      showAlert(t.failedToShareAudio);
     }
   };
 

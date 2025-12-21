@@ -34,6 +34,11 @@ export const Colors = {
   recordingPulse: '#FF5252',
   recordingBackground: '#FFEBEE',
 
+  // Playback colors (distinct from recording red)
+  playback: '#1976D2', // Blue - common for media players
+  playbackLight: '#63A4FF',
+  playbackDark: '#004BA0',
+
   // Status colors
   processing: '#1976D2', // Blue
   ready: '#2E7D32', // Green

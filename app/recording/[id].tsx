@@ -2,11 +2,15 @@ import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
+  TextInput,
   StyleSheet,
   SafeAreaView,
   useColorScheme,
   Alert,
+  TouchableOpacity,
+  Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { format } from 'date-fns';
 import { Colors } from '@/constants/Colors';
@@ -23,7 +27,7 @@ import {
   ShareModal,
 } from '@/components/ui';
 import { getFontSize } from '@/types';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system/next';
 
 type ViewTab = 'summary' | 'notes';
 
@@ -34,7 +38,7 @@ export default function RecordingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const { t } = useI18n();
-  const { settings, recordings, deleteRecording, markFirstRecordingEducationSeen } =
+  const { settings, recordings, deleteRecording, updateRecording, markFirstRecordingEducationSeen } =
     useAppStore();
   const textSize = settings.textSize;
 
@@ -43,6 +47,8 @@ export default function RecordingDetailScreen() {
   const [activeTab, setActiveTab] = useState<ViewTab>('summary');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const [isEditingLabel, setIsEditingLabel] = useState(false);
+  const [labelText, setLabelText] = useState(recording?.label || '');
 
   const {
     isPlaying,
@@ -123,7 +129,8 @@ export default function RecordingDetailScreen() {
   };
 
   const handleNoteLinePress = (timestamp: number) => {
-    seekTo(timestamp);
+    // Timestamps from Groq are in seconds, but seekTo expects milliseconds
+    seekTo(timestamp * 1000);
     if (!isPlaying) {
       play();
     }
@@ -132,11 +139,16 @@ export default function RecordingDetailScreen() {
   const handleDelete = async () => {
     setShowDeleteConfirm(false);
 
-    // Delete audio file
-    try {
-      await FileSystem.deleteAsync(recording.audioUri, { idempotent: true });
-    } catch (error) {
-      console.error('Failed to delete audio file:', error);
+    // Delete audio file (only on native - blob URLs on web are garbage collected)
+    if (Platform.OS !== 'web' && recording.audioUri) {
+      try {
+        const file = new File(recording.audioUri);
+        if (file.exists) {
+          file.delete();
+        }
+      } catch (error) {
+        console.error('Failed to delete audio file:', error);
+      }
     }
 
     // Delete from store
@@ -144,6 +156,13 @@ export default function RecordingDetailScreen() {
 
     // Navigate back
     router.back();
+  };
+
+  const handleSaveLabel = () => {
+    if (recording) {
+      updateRecording(recording.id, { label: labelText.trim() || undefined });
+    }
+    setIsEditingLabel(false);
   };
 
   const tabs = [
@@ -156,6 +175,59 @@ export default function RecordingDetailScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]}>
+      {/* Label (editable) */}
+      <View style={styles.labelContainer}>
+        {isEditingLabel ? (
+          <View style={styles.labelEditRow}>
+            <TextInput
+              style={[
+                styles.labelInput,
+                {
+                  color: textColor,
+                  backgroundColor: isDark ? Colors.cardDark : Colors.card,
+                  borderColor: Colors.primary,
+                  fontSize: getFontSize('header', textSize),
+                },
+              ]}
+              value={labelText}
+              onChangeText={setLabelText}
+              placeholder={t.addLabel || '添加標籤...'}
+              placeholderTextColor={secondaryColor}
+              autoFocus
+              onBlur={handleSaveLabel}
+              onSubmitEditing={handleSaveLabel}
+            />
+            <TouchableOpacity onPress={handleSaveLabel} style={styles.saveButton}>
+              <Ionicons name="checkmark" size={28} color={Colors.primary} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <TouchableOpacity
+            style={styles.labelTouchable}
+            onPress={() => setIsEditingLabel(true)}
+          >
+            <Text
+              style={[
+                styles.labelText,
+                {
+                  color: recording.label ? textColor : secondaryColor,
+                  fontSize: getFontSize('header', textSize),
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {recording.label || (t.addLabel || '點擊添加標籤')}
+            </Text>
+            <Ionicons
+              name="pencil"
+              size={20}
+              color={secondaryColor}
+              style={styles.editIcon}
+            />
+          </TouchableOpacity>
+        )}
+      </View>
+
       {/* Header Info */}
       <View style={styles.headerInfo}>
         <Text
@@ -233,7 +305,7 @@ export default function RecordingDetailScreen() {
         <BigButton
           title={t.share}
           onPress={() => setShowShareModal(true)}
-          variant="primary"
+          variant="playback"
           style={styles.actionButton}
         />
         <BigButton
@@ -270,6 +342,38 @@ export default function RecordingDetailScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  labelContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  labelEditRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  labelInput: {
+    flex: 1,
+    borderWidth: 2,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    fontWeight: '600',
+  },
+  saveButton: {
+    padding: 8,
+  },
+  labelTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  labelText: {
+    fontWeight: '600',
+    fontStyle: 'italic',
+  },
+  editIcon: {
+    marginLeft: 8,
   },
   headerInfo: {
     alignItems: 'center',

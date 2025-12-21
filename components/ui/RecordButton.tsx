@@ -1,12 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import {
-  TouchableOpacity,
+  Pressable,
   View,
   Text,
   StyleSheet,
   Animated,
   useColorScheme,
   Dimensions,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -55,11 +56,15 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
   }, [isRecording, pulseAnim]);
 
   const handlePress = () => {
-    Haptics.impactAsync(
-      isRecording
-        ? Haptics.ImpactFeedbackStyle.Heavy
-        : Haptics.ImpactFeedbackStyle.Medium
-    );
+    console.log('RecordButton handlePress called, isRecording:', isRecording);
+    // Haptics only work on native
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(
+        isRecording
+          ? Haptics.ImpactFeedbackStyle.Heavy
+          : Haptics.ImpactFeedbackStyle.Medium
+      );
+    }
     onPress();
   };
 
@@ -67,36 +72,27 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
     ? Colors.recordingActive
     : Colors.primary;
 
-  return (
-    <View style={styles.container}>
+  const buttonContent = (
+    <>
       <Animated.View
         style={[
           styles.buttonWrapper,
           { transform: [{ scale: pulseAnim }] },
         ]}
       >
-        <TouchableOpacity
+        <View
           style={[
             styles.button,
             { backgroundColor },
             isRecording && styles.buttonRecording,
           ]}
-          onPress={handlePress}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
-          accessibilityHint={
-            isRecording
-              ? 'Double tap to stop recording'
-              : 'Double tap to start recording'
-          }
         >
           <Ionicons
             name={isRecording ? 'stop' : 'mic'}
             size={BUTTON_SIZE * 0.4}
             color="#FFFFFF"
           />
-        </TouchableOpacity>
+        </View>
       </Animated.View>
 
       {label && (
@@ -112,7 +108,27 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
           {label}
         </Text>
       )}
-    </View>
+    </>
+  );
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.container,
+        pressed && { opacity: 0.8 },
+        Platform.OS === 'web' && { cursor: 'pointer' as const },
+      ]}
+      onPress={handlePress}
+      accessibilityRole="button"
+      accessibilityLabel={isRecording ? 'Stop recording' : 'Start recording'}
+      accessibilityHint={
+        isRecording
+          ? 'Double tap to stop recording'
+          : 'Double tap to start recording'
+      }
+    >
+      {buttonContent}
+    </Pressable>
   );
 }
 

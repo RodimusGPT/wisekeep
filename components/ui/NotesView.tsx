@@ -25,11 +25,12 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
   const textSize = useAppStore((state) => state.settings.textSize);
   const { t } = useI18n();
 
-  const formatTimestamp = (ms: number): string => {
-    const totalSeconds = Math.floor(ms / 1000);
+  // Note: timestamps from Groq are in seconds, not milliseconds
+  const formatTimestamp = (seconds: number): string => {
+    const totalSeconds = Math.floor(seconds);
     const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes.toString().padStart(2, '0')}:${seconds
+    const secs = totalSeconds % 60;
+    return `${minutes.toString().padStart(2, '0')}:${secs
       .toString()
       .padStart(2, '0')}`;
   };
@@ -42,14 +43,16 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
   };
 
   // Determine if a line is currently playing
+  // currentTimestamp is in milliseconds (from player), line.timestamp is in seconds (from Groq)
   const isCurrentLine = (line: NoteLine, index: number): boolean => {
     if (currentTimestamp === undefined) return false;
 
+    const currentSeconds = currentTimestamp / 1000; // Convert ms to seconds
     const nextLine = notes[index + 1];
     const lineStart = line.timestamp;
     const lineEnd = nextLine ? nextLine.timestamp : Infinity;
 
-    return currentTimestamp >= lineStart && currentTimestamp < lineEnd;
+    return currentSeconds >= lineStart && currentSeconds < lineEnd;
   };
 
   const textColor = isDark ? Colors.textDark : Colors.text;

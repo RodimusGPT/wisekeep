@@ -35,7 +35,7 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
   };
 
   const backgroundColor = isDark ? Colors.backgroundSecondaryDark : Colors.backgroundSecondary;
-  const activeBackgroundColor = Colors.primary;
+  const activeBackgroundColor = Colors.playback; // Blue for playback page controls
   const inactiveTextColor = isDark ? Colors.textDark : Colors.text;
 
   return (

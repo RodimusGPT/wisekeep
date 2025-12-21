@@ -4,11 +4,12 @@ import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native
 import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAppStore } from '@/store';
+import { useAuth } from '@/hooks/useAuth';
 import { Colors } from '@/constants/Colors';
 
 export {
@@ -50,15 +51,35 @@ function RootLayoutNav() {
   const router = useRouter();
   const segments = useSegments();
   const { settings } = useAppStore();
+  const { initAuth, isAuthLoading } = useAuth();
+  const [isMounted, setIsMounted] = useState(false);
+
+  // Track when layout is mounted
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  // Initialize user authentication when app starts
+  // Note: Admin uses a completely separate Supabase client with its own storage,
+  // so user auth and admin auth are fully isolated - no need to skip on admin routes
+  useEffect(() => {
+    console.log('[Layout] Effect running, isMounted:', isMounted);
+    if (isMounted) {
+      console.log('[Layout] Calling initAuth...');
+      initAuth();
+    }
+  }, [isMounted, initAuth]);
 
   // Redirect to onboarding if not completed
   useEffect(() => {
+    if (!isMounted || isAuthLoading) return;
+
     const inOnboarding = segments[0] === 'onboarding';
 
     if (!settings.hasCompletedOnboarding && !inOnboarding) {
       router.replace('/onboarding');
     }
-  }, [settings.hasCompletedOnboarding, segments]);
+  }, [settings.hasCompletedOnboarding, segments, isMounted, isAuthLoading, router]);
 
   // Custom theme with WiseKeep colors
   const lightTheme = {

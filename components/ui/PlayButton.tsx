@@ -30,7 +30,7 @@ export function PlayButton({ isPlaying, onPress, size = 'large' }: PlayButtonPro
           width: buttonSize,
           height: buttonSize,
           borderRadius: buttonSize / 2,
-          backgroundColor: Colors.primary,
+          backgroundColor: Colors.playback, // Blue for playback (distinct from red recording button)
         },
       ]}
       onPress={handlePress}

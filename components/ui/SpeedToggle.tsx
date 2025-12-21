@@ -41,7 +41,7 @@ export function SpeedToggle({
           styles.option,
           speed === 'normal' && {
             backgroundColor: activeBackgroundColor,
-            borderColor: Colors.primary,
+            borderColor: Colors.playback, // Blue for playback controls
           },
         ]}
         onPress={() => handlePress('normal')}
@@ -53,7 +53,7 @@ export function SpeedToggle({
           style={[
             styles.optionText,
             {
-              color: speed === 'normal' ? Colors.primary : textColor,
+              color: speed === 'normal' ? Colors.playback : textColor,
               fontSize: getFontSize('body', textSize),
             },
             speed === 'normal' && styles.activeText,
@@ -68,7 +68,7 @@ export function SpeedToggle({
           styles.option,
           speed === 'slow' && {
             backgroundColor: activeBackgroundColor,
-            borderColor: Colors.primary,
+            borderColor: Colors.playback, // Blue for playback controls
           },
         ]}
         onPress={() => handlePress('slow')}
@@ -80,7 +80,7 @@ export function SpeedToggle({
           style={[
             styles.optionText,
             {
-              color: speed === 'slow' ? Colors.primary : textColor,
+              color: speed === 'slow' ? Colors.playback : textColor,
               fontSize: getFontSize('body', textSize),
             },
             speed === 'slow' && styles.activeText,
