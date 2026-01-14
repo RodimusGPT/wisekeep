@@ -26,6 +26,8 @@ export function SummaryView({ summary, tapNotesHint = true }: SummaryViewProps) 
   const textColor = isDark ? Colors.textDark : Colors.text;
   const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
   const bulletColor = Colors.primary;
+  const cardBackground = isDark ? Colors.cardDark : Colors.card;
+  const borderColor = isDark ? Colors.borderDark : Colors.border;
 
   return (
     <ScrollView
@@ -33,15 +35,30 @@ export function SummaryView({ summary, tapNotesHint = true }: SummaryViewProps) 
       contentContainerStyle={styles.contentContainer}
       showsVerticalScrollIndicator
     >
+      {/* Summary header */}
+      <View style={styles.headerContainer}>
+        <Ionicons name="list" size={20} color={bulletColor} />
+        <Text
+          style={[
+            styles.headerText,
+            { color: bulletColor, fontSize: getFontSize('body', textSize) },
+          ]}
+        >
+          {summary.length} {summary.length === 1 ? 'Key Point' : 'Key Points'}
+        </Text>
+      </View>
+
       {summary.map((point, index) => (
-        <View key={index} style={styles.point}>
-          <View style={styles.bulletContainer}>
-            <Ionicons
-              name="ellipse"
-              size={10}
-              color={bulletColor}
-              style={styles.bullet}
-            />
+        <View
+          key={index}
+          style={[
+            styles.point,
+            { backgroundColor: cardBackground, borderColor },
+          ]}
+        >
+          {/* Numbered bullet for easier reference */}
+          <View style={[styles.bulletContainer, { backgroundColor: bulletColor }]}>
+            <Text style={styles.bulletNumber}>{index + 1}</Text>
           </View>
           <Text
             style={[
@@ -59,14 +76,17 @@ export function SummaryView({ summary, tapNotesHint = true }: SummaryViewProps) 
 
       {/* Hint to view notes */}
       {tapNotesHint && (
-        <Text
-          style={[
-            styles.hint,
-            { color: secondaryColor, fontSize: getFontSize('small', textSize) },
-          ]}
-        >
-          {t.tapNotesForMore}
-        </Text>
+        <View style={styles.hintContainer}>
+          <Ionicons name="document-text-outline" size={20} color={secondaryColor} />
+          <Text
+            style={[
+              styles.hint,
+              { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+            ]}
+          >
+            {t.tapNotesForMore}
+          </Text>
+        </View>
       )}
     </ScrollView>
   );
@@ -78,31 +98,59 @@ const styles = StyleSheet.create({
     minHeight: 100,
   },
   contentContainer: {
-    paddingHorizontal: 8,
-    paddingVertical: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 12,
     flexGrow: 1,
+  },
+  headerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  headerText: {
+    fontWeight: '600',
   },
   point: {
     flexDirection: 'row',
-    marginBottom: 16,
-    paddingRight: 8,
+    marginBottom: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingLeft: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: 'flex-start',
   },
   bulletContainer: {
-    width: 20,
-    paddingTop: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+    marginTop: 2,
   },
-  bullet: {
-    marginTop: 0,
+  bulletNumber: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 14,
   },
   text: {
     flex: 1,
-    lineHeight: 24,
+    lineHeight: 28, // Increased line height for readability
     fontWeight: '400',
   },
-  hint: {
-    textAlign: 'center',
-    marginTop: 16,
+  hintContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 20,
     marginBottom: 24,
+    paddingVertical: 12,
+  },
+  hint: {
     fontStyle: 'italic',
   },
 });

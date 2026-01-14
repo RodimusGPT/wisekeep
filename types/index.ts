@@ -31,25 +31,33 @@ export interface AppSettings {
 
 export type TextSize = 'small' | 'medium' | 'large';
 
-// Text size scale factors
+// Text size scale factors - larger increments for senior accessibility
 export const TEXT_SIZE_SCALES: Record<TextSize, number> = {
-  small: 0.9,
-  medium: 1.0,
-  large: 1.15,
+  small: 0.85,   // For users who prefer smaller text
+  medium: 1.0,   // Default - already senior-friendly
+  large: 1.2,    // Extra large for low vision users
 };
 
-// Base font sizes (in points) - designed for seniors
+// Base font sizes (in points) - optimized for senior accessibility
+// Follows WCAG guidelines: minimum 16px for body, larger preferred
 export const BASE_FONT_SIZES = {
-  body: 20,
-  bodyLarge: 22,
-  button: 22,
-  header: 28,
-  headerLarge: 32,
-  small: 16,
-  timer: 48,
+  small: 16,       // Smallest readable text (metadata, timestamps)
+  body: 18,        // Main content text - comfortable reading size
+  bodyLarge: 20,   // Emphasized body text
+  button: 18,      // Button text - matches body for consistency
+  header: 24,      // Section headers
+  headerLarge: 28, // Page titles
+  timer: 48,       // Large timer display
 };
 
 // Calculate actual font size based on text size preference
 export function getFontSize(base: keyof typeof BASE_FONT_SIZES, textSize: TextSize): number {
   return Math.round(BASE_FONT_SIZES[base] * TEXT_SIZE_SCALES[textSize]);
 }
+
+// Line height multipliers for readability
+export const LINE_HEIGHT_MULTIPLIERS = {
+  tight: 1.3,    // For single-line items
+  normal: 1.5,   // Default - good for body text
+  relaxed: 1.7,  // For longer reading passages
+};

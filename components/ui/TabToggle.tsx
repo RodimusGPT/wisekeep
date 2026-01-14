@@ -34,10 +34,11 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
     }
   };
 
-  const backgroundColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+  const backgroundColor = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.06)';
   const activeBackgroundColor = isDark ? Colors.cardDark : '#FFFFFF';
   const activeTextColor = isDark ? Colors.textDark : Colors.text;
-  const inactiveTextColor = isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.4)';
+  const inactiveTextColor = isDark ? Colors.textTertiaryDark : Colors.textTertiary;
+  const activeBorderColor = Colors.primary;
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
@@ -49,10 +50,13 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
             key={tab.key}
             style={[
               styles.tab,
-              isActive && { backgroundColor: activeBackgroundColor },
+              isActive && [
+                styles.activeTab,
+                { backgroundColor: activeBackgroundColor, borderColor: activeBorderColor },
+              ],
             ]}
             onPress={() => handleTabPress(tab.key)}
-            activeOpacity={0.8}
+            activeOpacity={0.7}
             accessibilityRole="tab"
             accessibilityState={{ selected: isActive }}
             accessibilityLabel={tab.label}
@@ -62,7 +66,7 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
                 styles.tabText,
                 {
                   color: isActive ? activeTextColor : inactiveTextColor,
-                  fontSize: getFontSize('small', textSize),
+                  fontSize: getFontSize('body', textSize),
                 },
                 isActive && styles.activeTabText,
               ]}
@@ -79,24 +83,32 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    borderRadius: 6,
-    padding: 2,
-    gap: 2,
+    borderRadius: 12,
+    padding: 4,
+    gap: 4,
   },
   tab: {
     flex: 1,
-    minHeight: 28,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 5,
+    minHeight: 48, // Senior-friendly: minimum 48px touch target
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  activeTab: {
+    // Shadow for active state depth
+    // @ts-ignore - boxShadow supported on web
+    boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+    elevation: 2,
   },
   tabText: {
-    fontWeight: '400',
+    fontWeight: '500',
     textAlign: 'center',
   },
   activeTabText: {
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });

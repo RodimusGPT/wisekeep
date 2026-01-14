@@ -657,36 +657,43 @@ const styles = StyleSheet.create({
   subscriptionCard: {
     marginHorizontal: 20,
     marginBottom: 24,
-    borderRadius: 16,
-    padding: 20,
+    borderRadius: 20,
+    padding: 24,
+    // Shadow for depth
+    // @ts-ignore - boxShadow supported on web
+    boxShadow: '0px 4px 12px rgba(0, 0, 0, 0.1)',
+    elevation: 4,
   },
   subscriptionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(128, 128, 128, 0.15)',
   },
   usageSectionContainer: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   usageLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    gap: 10,
+    marginBottom: 12,
   },
   usageLabel: {
-    fontWeight: '600',
+    fontWeight: '700',
     flex: 1,
   },
   usageValue: {
-    fontWeight: '500',
+    fontWeight: '600',
   },
   tierBadge: {
     backgroundColor: Colors.border,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 24,
   },
   tierBadgeVip: {
     backgroundColor: '#FFD700',
@@ -697,25 +704,25 @@ const styles = StyleSheet.create({
   tierBadgeText: {
     color: '#000000',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 15,
   },
   usageText: {
     fontWeight: '500',
   },
   usageBarContainer: {
-    marginBottom: 16,
+    marginBottom: 8,
   },
   usageBarBackground: {
-    height: 8,
-    backgroundColor: 'rgba(128, 128, 128, 0.2)',
-    borderRadius: 4,
+    height: 12,
+    backgroundColor: 'rgba(128, 128, 128, 0.15)',
+    borderRadius: 6,
     overflow: 'hidden',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   usageBarFill: {
     height: '100%',
     backgroundColor: Colors.primary,
-    borderRadius: 4,
+    borderRadius: 6,
   },
   usageDetails: {
     textAlign: 'right',
@@ -725,10 +732,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: Colors.primary,
-    paddingVertical: 14,
-    borderRadius: 12,
-    marginTop: 8,
-    gap: 8,
+    paddingVertical: 16,
+    borderRadius: 14,
+    marginTop: 12,
+    gap: 10,
+    // Shadow for button
+    // @ts-ignore - boxShadow supported on web
+    boxShadow: '0px 4px 8px rgba(198, 40, 40, 0.3)',
+    elevation: 4,
   },
   upgradeButtonText: {
     color: '#FFFFFF',
@@ -736,30 +747,34 @@ const styles = StyleSheet.create({
   },
   restoreButton: {
     alignItems: 'center',
-    paddingVertical: 12,
-    marginTop: 8,
+    paddingVertical: 14,
+    marginTop: 12,
   },
   restoreButtonText: {
-    fontWeight: '500',
+    fontWeight: '600',
   },
   supportCodeContainer: {
     alignItems: 'center',
-    paddingTop: 16,
-    marginTop: 8,
+    paddingTop: 20,
+    marginTop: 12,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(128, 128, 128, 0.2)',
+    borderTopColor: 'rgba(128, 128, 128, 0.15)',
   },
   supportCodeLabel: {
-    marginBottom: 4,
+    marginBottom: 6,
   },
   supportCodeRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(128, 128, 128, 0.08)',
+    borderRadius: 8,
   },
   supportCodeText: {
     fontWeight: '700',
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    letterSpacing: 1,
+    letterSpacing: 2,
   },
 });

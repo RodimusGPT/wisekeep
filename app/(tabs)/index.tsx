@@ -10,7 +10,8 @@ import {
   Animated,
   Easing,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
 import { useI18n, useRecording, useAuth } from '@/hooks';
@@ -53,6 +54,14 @@ export default function HomeScreen() {
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [elapsedTime, setElapsedTime] = useState(0);
   const spinAnim = useRef(new Animated.Value(0)).current;
+  const scrollViewRef = useRef<ScrollView>(null);
+
+  // Scroll to top when tab is focused (so record button is visible)
+  useFocusEffect(
+    useCallback(() => {
+      scrollViewRef.current?.scrollTo({ y: 0, animated: true });
+    }, [])
+  );
 
   // Spinning animation for processing indicator
   useEffect(() => {
@@ -480,6 +489,7 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor }]}>
       <ScrollView
+        ref={scrollViewRef}
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -508,32 +518,39 @@ export default function HomeScreen() {
         {/* Recent Recordings */}
         <View style={styles.recentSection}>
           <View style={styles.sectionHeader}>
-            <Text
-              style={[
-                styles.sectionTitle,
-                { color: textColor, fontSize: getFontSize('bodyLarge', textSize) },
-              ]}
-            >
-              {t.recentRecordings}
-            </Text>
+            <View style={styles.sectionTitleRow}>
+              <Ionicons name="time-outline" size={22} color={Colors.primary} />
+              <Text
+                style={[
+                  styles.sectionTitle,
+                  { color: textColor, fontSize: getFontSize('header', textSize) },
+                ]}
+              >
+                {t.recentRecordings}
+              </Text>
+            </View>
 
             {recordings.length > 3 && (
               <BigButton
                 title={t.viewAll}
                 onPress={handleViewAll}
                 variant="secondary"
+                icon="folder-open-outline"
                 style={styles.viewAllButton}
-                textStyle={{ fontSize: getFontSize('small', textSize) }}
+                textStyle={{ fontSize: getFontSize('body', textSize) }}
               />
             )}
           </View>
 
           {recentRecordings.length === 0 ? (
-            <View style={styles.emptyState}>
+            <View style={[styles.emptyState, { backgroundColor: isDark ? Colors.cardDark : Colors.card, borderColor: isDark ? Colors.borderDark : Colors.border }]}>
+              <View style={styles.emptyIconContainer}>
+                <Ionicons name="mic-outline" size={56} color={Colors.primary} />
+              </View>
               <Text
                 style={[
                   styles.emptyTitle,
-                  { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+                  { color: textColor, fontSize: getFontSize('header', textSize) },
                 ]}
               >
                 {t.noRecordings}
@@ -546,6 +563,17 @@ export default function HomeScreen() {
               >
                 {t.noRecordingsMessage}
               </Text>
+              <View style={styles.emptyHint}>
+                <Ionicons name="arrow-up" size={20} color={Colors.primary} />
+                <Text
+                  style={[
+                    styles.emptyHintText,
+                    { color: Colors.primary, fontSize: getFontSize('body', textSize) },
+                  ]}
+                >
+                  {t.tapToRecord}
+                </Text>
+              </View>
             </View>
           ) : (
             recentRecordings.map((recording) => (
@@ -586,33 +614,65 @@ const styles = StyleSheet.create({
     paddingVertical: 40,
   },
   recentSection: {
-    marginTop: 20,
+    marginTop: 32,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   sectionTitle: {
     fontWeight: '700',
   },
   viewAllButton: {
     paddingHorizontal: 16,
-    paddingVertical: 8,
-    minHeight: 40,
+    paddingVertical: 10,
+    minHeight: 44,
   },
   emptyState: {
     alignItems: 'center',
-    paddingVertical: 40,
+    paddingVertical: 48,
+    paddingHorizontal: 24,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderStyle: 'dashed',
+  },
+  emptyIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(198, 40, 40, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
   },
   emptyTitle: {
-    fontWeight: '600',
-    marginBottom: 8,
+    fontWeight: '700',
+    marginBottom: 12,
+    textAlign: 'center',
   },
   emptyMessage: {
     textAlign: 'center',
     lineHeight: 28,
+    marginBottom: 24,
+  },
+  emptyHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: 'rgba(198, 40, 40, 0.1)',
+  },
+  emptyHintText: {
+    fontWeight: '600',
   },
 
   // Recording view

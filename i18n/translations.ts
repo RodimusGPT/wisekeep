@@ -79,6 +79,8 @@ export interface Translations {
   shareSummary: string;
   shareNotes: string;
   shareAudio: string;
+  downloadAudio: string;
+  convertingAudio: string;
   copyText: string;
   copied: string;
   noSummaryToShare: string;
@@ -230,6 +232,8 @@ export const translations: Record<Language, Translations> = {
     shareSummary: '拷貝摘要內容',
     shareNotes: '拷貝筆記內容',
     shareAudio: '分享錄音',
+    downloadAudio: '下載錄音',
+    convertingAudio: '轉換中...',
     copyText: '複製文字',
     copied: '已複製',
     noSummaryToShare: '沒有摘要可以分享',
@@ -380,6 +384,8 @@ export const translations: Record<Language, Translations> = {
     shareSummary: 'Share Summary',
     shareNotes: 'Share Notes',
     shareAudio: 'Share Audio',
+    downloadAudio: 'Download Audio',
+    convertingAudio: 'Converting...',
     copyText: 'Copy Text',
     copied: 'Copied',
     noSummaryToShare: 'No summary to share',

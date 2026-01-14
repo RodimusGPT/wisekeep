@@ -16,7 +16,8 @@ import { useAppStore } from '@/store';
 import { getFontSize } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const BUTTON_SIZE = Math.min(SCREEN_WIDTH * 0.45, 180); // At least 40% of screen width
+const BUTTON_SIZE = Math.min(SCREEN_WIDTH * 0.48, 200); // Slightly larger for seniors
+const RING_SIZE = BUTTON_SIZE + 16;
 
 interface RecordButtonProps {
   isRecording: boolean;
@@ -31,13 +32,15 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
 
   // Pulsing animation for recording state
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const ringAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (isRecording) {
+      // Button pulse
       const pulse = Animated.loop(
         Animated.sequence([
           Animated.timing(pulseAnim, {
-            toValue: 1.1,
+            toValue: 1.08,
             duration: 800,
             useNativeDriver: true,
           }),
@@ -48,12 +51,32 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
           }),
         ])
       );
+      // Ring pulse (slightly offset)
+      const ring = Animated.loop(
+        Animated.sequence([
+          Animated.timing(ringAnim, {
+            toValue: 1,
+            duration: 1200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(ringAnim, {
+            toValue: 0,
+            duration: 1200,
+            useNativeDriver: true,
+          }),
+        ])
+      );
       pulse.start();
-      return () => pulse.stop();
+      ring.start();
+      return () => {
+        pulse.stop();
+        ring.stop();
+      };
     } else {
       pulseAnim.setValue(1);
+      ringAnim.setValue(0);
     }
-  }, [isRecording, pulseAnim]);
+  }, [isRecording, pulseAnim, ringAnim]);
 
   const handlePress = () => {
     console.log('RecordButton handlePress called, isRecording:', isRecording);
@@ -72,8 +95,50 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
     ? Colors.recordingActive
     : Colors.primary;
 
+  const ringOpacity = ringAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.3, 0.6],
+  });
+
+  const ringScale = ringAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.15],
+  });
+
   const buttonContent = (
-    <>
+    <View style={styles.buttonContainer}>
+      {/* Animated ring for recording state */}
+      {isRecording && (
+        <Animated.View
+          style={[
+            styles.recordingRing,
+            {
+              width: RING_SIZE,
+              height: RING_SIZE,
+              borderRadius: RING_SIZE / 2,
+              borderColor: Colors.recordingActive,
+              opacity: ringOpacity,
+              transform: [{ scale: ringScale }],
+            },
+          ]}
+        />
+      )}
+
+      {/* Outer ring for visual emphasis when not recording */}
+      {!isRecording && (
+        <View
+          style={[
+            styles.staticRing,
+            {
+              width: RING_SIZE,
+              height: RING_SIZE,
+              borderRadius: RING_SIZE / 2,
+              borderColor: isDark ? 'rgba(198, 40, 40, 0.3)' : 'rgba(198, 40, 40, 0.2)',
+            },
+          ]}
+        />
+      )}
+
       <Animated.View
         style={[
           styles.buttonWrapper,
@@ -89,33 +154,19 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
         >
           <Ionicons
             name={isRecording ? 'stop' : 'mic'}
-            size={BUTTON_SIZE * 0.4}
+            size={BUTTON_SIZE * 0.38}
             color="#FFFFFF"
           />
         </View>
       </Animated.View>
-
-      {label && (
-        <Text
-          style={[
-            styles.label,
-            {
-              color: isDark ? Colors.textDark : Colors.text,
-              fontSize: getFontSize('body', textSize),
-            },
-          ]}
-        >
-          {label}
-        </Text>
-      )}
-    </>
+    </View>
   );
 
   return (
     <Pressable
       style={({ pressed }) => [
         styles.container,
-        pressed && { opacity: 0.8 },
+        pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] },
         Platform.OS === 'web' && { cursor: 'pointer' as const },
       ]}
       onPress={handlePress}
@@ -128,6 +179,20 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
       }
     >
       {buttonContent}
+
+      {label && (
+        <Text
+          style={[
+            styles.label,
+            {
+              color: isRecording ? Colors.recordingActive : (isDark ? Colors.textDark : Colors.text),
+              fontSize: getFontSize('bodyLarge', textSize),
+            },
+          ]}
+        >
+          {label}
+        </Text>
+      )}
     </Pressable>
   );
 }
@@ -137,11 +202,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  buttonContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: RING_SIZE,
+    height: RING_SIZE,
+  },
+  recordingRing: {
+    position: 'absolute',
+    borderWidth: 4,
+  },
+  staticRing: {
+    position: 'absolute',
+    borderWidth: 3,
+  },
   buttonWrapper: {
+    borderRadius: BUTTON_SIZE / 2,
     // Shadow for depth
     // @ts-ignore - boxShadow is supported on web
-    boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.3)',
-    elevation: 8, // For Android
+    boxShadow: '0px 6px 16px rgba(0, 0, 0, 0.35)',
+    elevation: 10, // For Android
   },
   button: {
     width: BUTTON_SIZE,
@@ -151,13 +231,14 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   buttonRecording: {
-    // Recording state has slightly different shadow
+    // Recording state has colored glow
     // @ts-ignore - boxShadow is supported on web
-    boxShadow: `0px 4px 8px ${Colors.recordingActive}80`,
+    boxShadow: `0px 6px 20px ${Colors.recordingActive}80`,
   },
   label: {
-    marginTop: 20,
-    fontWeight: '500',
+    marginTop: 24,
+    fontWeight: '600',
     textAlign: 'center',
+    letterSpacing: 0.5,
   },
 });

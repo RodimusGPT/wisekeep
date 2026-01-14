@@ -7,6 +7,7 @@ import {
   StyleSheet,
   useColorScheme,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
@@ -37,7 +38,7 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
 
   const handleLinePress = (timestamp: number) => {
     if (onLinePress) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       onLinePress(timestamp);
     }
   };
@@ -57,9 +58,8 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
 
   const textColor = isDark ? Colors.textDark : Colors.text;
   const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
-  const highlightBackground = isDark
-    ? 'rgba(211, 47, 47, 0.2)'
-    : 'rgba(211, 47, 47, 0.1)';
+  const highlightBackground = isDark ? Colors.highlightDark : Colors.highlight;
+  const borderColor = isDark ? Colors.borderDark : Colors.border;
 
   return (
     <ScrollView
@@ -75,7 +75,8 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
             key={line.id}
             style={[
               styles.line,
-              isCurrent && { backgroundColor: highlightBackground },
+              { borderBottomColor: borderColor },
+              isCurrent && [styles.currentLine, { backgroundColor: highlightBackground }],
             ]}
             onPress={() => handleLinePress(line.timestamp)}
             activeOpacity={0.6}
@@ -83,18 +84,30 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
             accessibilityRole="button"
             accessibilityLabel={`${line.text}. Tap to play from ${formatTimestamp(line.timestamp)}`}
           >
-            {/* Timestamp */}
-            <Text
-              style={[
-                styles.timestamp,
-                {
-                  color: isCurrent ? Colors.primary : secondaryColor,
-                  fontSize: getFontSize('small', textSize),
-                },
-              ]}
-            >
-              {formatTimestamp(line.timestamp)}
-            </Text>
+            {/* Timestamp with play indicator */}
+            <View style={styles.timestampContainer}>
+              {/* Play indicator for current line */}
+              {isCurrent ? (
+                <Ionicons name="volume-high" size={18} color={Colors.primary} style={styles.playingIcon} />
+              ) : onLinePress ? (
+                <Ionicons name="play-circle-outline" size={18} color={secondaryColor} style={styles.playIcon} />
+              ) : (
+                <View style={styles.iconPlaceholder} />
+              )}
+
+              <Text
+                style={[
+                  styles.timestamp,
+                  {
+                    color: isCurrent ? Colors.primary : secondaryColor,
+                    fontSize: getFontSize('body', textSize),
+                  },
+                  isCurrent && styles.timestampActive,
+                ]}
+              >
+                {formatTimestamp(line.timestamp)}
+              </Text>
+            </View>
 
             {/* Content */}
             <View style={styles.content}>
@@ -105,7 +118,7 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
                     styles.speaker,
                     {
                       color: Colors.primary,
-                      fontSize: getFontSize('small', textSize),
+                      fontSize: getFontSize('body', textSize),
                     },
                   ]}
                 >
@@ -121,7 +134,7 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
                     color: textColor,
                     fontSize: getFontSize('body', textSize),
                   },
-                  isCurrent && { fontWeight: '600' },
+                  isCurrent && styles.textActive,
                 ]}
               >
                 {line.text}
@@ -133,14 +146,17 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
 
       {/* Hint at bottom */}
       {onLinePress && (
-        <Text
-          style={[
-            styles.hint,
-            { color: secondaryColor, fontSize: getFontSize('small', textSize) },
-          ]}
-        >
-          {t.tapLineToHear}
-        </Text>
+        <View style={styles.hintContainer}>
+          <Ionicons name="hand-left-outline" size={20} color={secondaryColor} />
+          <Text
+            style={[
+              styles.hint,
+              { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+            ]}
+          >
+            {t.tapLineToHear}
+          </Text>
+        </View>
       )}
     </ScrollView>
   );
@@ -152,34 +168,70 @@ const styles = StyleSheet.create({
     minHeight: 100,
   },
   contentContainer: {
-    paddingVertical: 8,
+    paddingVertical: 12,
     flexGrow: 1,
   },
   line: {
     flexDirection: 'row',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    marginBottom: 2,
+    minHeight: 56, // Senior-friendly: minimum touch target
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 4,
+    borderBottomWidth: 1,
+    alignItems: 'flex-start',
+  },
+  currentLine: {
+    borderBottomWidth: 0,
+    borderLeftWidth: 3,
+    borderLeftColor: Colors.primary,
+  },
+  timestampContainer: {
+    minWidth: 90,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   timestamp: {
-    width: 50,
     fontVariant: ['tabular-nums'],
+    fontWeight: '500',
+  },
+  timestampActive: {
+    fontWeight: '700',
+  },
+  playIcon: {
+    opacity: 0.6,
+  },
+  playingIcon: {
+    // Active playing indicator
+  },
+  iconPlaceholder: {
+    width: 18,
   },
   content: {
     flex: 1,
+    paddingLeft: 8,
   },
   speaker: {
-    fontWeight: '600',
-    marginBottom: 4,
+    fontWeight: '700',
+    marginBottom: 6,
   },
   text: {
-    lineHeight: 22,
+    lineHeight: 28, // Increased line height for readability
+  },
+  textActive: {
+    fontWeight: '600',
+  },
+  hintContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 20,
+    marginBottom: 24,
+    paddingVertical: 12,
   },
   hint: {
-    textAlign: 'center',
-    marginTop: 16,
-    marginBottom: 24,
     fontStyle: 'italic',
   },
 });

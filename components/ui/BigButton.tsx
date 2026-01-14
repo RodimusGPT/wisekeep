@@ -6,7 +6,9 @@ import {
   ViewStyle,
   TextStyle,
   useColorScheme,
+  View,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
@@ -20,6 +22,7 @@ interface BigButtonProps {
   style?: ViewStyle;
   textStyle?: TextStyle;
   size?: 'normal' | 'large';
+  icon?: string; // Ionicons name
 }
 
 export function BigButton({
@@ -30,6 +33,7 @@ export function BigButton({
   style,
   textStyle,
   size = 'normal',
+  icon,
 }: BigButtonProps) {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
@@ -60,9 +64,19 @@ export function BigButton({
     }
   };
 
+  const getBorderColor = () => {
+    if (disabled) {
+      return 'transparent';
+    }
+    if (variant === 'secondary') {
+      return isDark ? Colors.borderDark : Colors.border;
+    }
+    return 'transparent';
+  };
+
   const getTextColor = () => {
     if (disabled) {
-      return isDark ? '#757575' : '#9E9E9E';
+      return isDark ? '#616161' : '#9E9E9E';
     }
     if (variant === 'secondary') {
       return isDark ? Colors.textDark : Colors.text;
@@ -77,7 +91,11 @@ export function BigButton({
       style={[
         styles.button,
         size === 'large' && styles.buttonLarge,
-        { backgroundColor: getBackgroundColor() },
+        {
+          backgroundColor: getBackgroundColor(),
+          borderColor: getBorderColor(),
+          borderWidth: variant === 'secondary' ? 2 : 0,
+        },
         style,
       ]}
       onPress={handlePress}
@@ -85,16 +103,27 @@ export function BigButton({
       activeOpacity={0.7}
       accessibilityRole="button"
       accessibilityLabel={title}
+      accessibilityState={{ disabled }}
     >
-      <Text
-        style={[
-          styles.text,
-          { color: getTextColor(), fontSize },
-          textStyle,
-        ]}
-      >
-        {title}
-      </Text>
+      <View style={styles.content}>
+        {icon && (
+          <Ionicons
+            name={icon as any}
+            size={size === 'large' ? 28 : 22}
+            color={getTextColor()}
+            style={styles.icon}
+          />
+        )}
+        <Text
+          style={[
+            styles.text,
+            { color: getTextColor(), fontSize },
+            textStyle,
+          ]}
+        >
+          {title}
+        </Text>
+      </View>
     </TouchableOpacity>
   );
 }
@@ -104,17 +133,30 @@ const styles = StyleSheet.create({
     minHeight: 56,
     paddingHorizontal: 32,
     paddingVertical: 16,
-    borderRadius: 12,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
+    // Shadow for depth perception
+    // @ts-ignore - boxShadow supported on web
+    boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.1)',
+    elevation: 2,
   },
   buttonLarge: {
     minHeight: 72,
     paddingHorizontal: 40,
     paddingVertical: 20,
+    borderRadius: 16,
+  },
+  content: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icon: {
+    marginRight: 10,
   },
   text: {
-    fontWeight: '600',
+    fontWeight: '700',
     textAlign: 'center',
   },
 });

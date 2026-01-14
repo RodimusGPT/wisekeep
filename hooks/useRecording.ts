@@ -189,7 +189,7 @@ export function useRecording(): UseRecordingReturn {
               createdAt: new Date().toISOString(),
               duration: finalDuration,
               audioUri: audioUri,
-              status: 'processing_notes',
+              status: 'recorded', // Will be uploaded next, not processing yet
               language: settings.language,
             };
 
@@ -245,7 +245,7 @@ export function useRecording(): UseRecordingReturn {
         createdAt: new Date().toISOString(),
         duration: finalDuration,
         audioUri: permanentUri,
-        status: 'processing_notes',
+        status: 'recorded', // Will be uploaded next, not processing yet
         language: settings.language,
       };
 

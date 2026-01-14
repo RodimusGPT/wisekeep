@@ -52,6 +52,7 @@ export default function RecordingDetailScreen() {
 
   const recording = recordings.find((r) => r.id === id);
 
+  // Tab state - will be set by useEffect based on recording content
   const [activeTab, setActiveTab] = useState<ViewTab>('summary');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
@@ -107,6 +108,34 @@ export default function RecordingDetailScreen() {
       markFirstRecordingEducationSeen();
     }
   }, []);
+
+  // Track which recording we've set the initial tab for
+  const tabSetForIdRef = React.useRef<string | null>(null);
+
+  // Set correct tab when navigating or when recording data becomes available
+  useEffect(() => {
+    // Reset tracking if we're viewing a different recording
+    if (tabSetForIdRef.current !== null && tabSetForIdRef.current !== id) {
+      tabSetForIdRef.current = null;
+    }
+
+    // Skip if we've already set the tab for this recording
+    if (tabSetForIdRef.current === id) return;
+
+    // Wait for recording data
+    if (!recording) return;
+
+    const hasNotes = !!(recording.notes && recording.notes.length > 0);
+
+    // Default to Notes tab when notes are available (more detailed view)
+    // Users can switch to Summary tab if they prefer the overview
+    const newTab = hasNotes ? 'notes' : 'summary';
+
+    console.log('[Tab] Setting tab for:', id, 'hasNotes:', hasNotes, '-> tab:', newTab);
+
+    setActiveTab(newTab);
+    tabSetForIdRef.current = id;
+  }, [id, recording?.notes?.length, recording?.summary?.length]);
 
   // Load usage data
   useEffect(() => {
@@ -719,63 +748,71 @@ const styles = StyleSheet.create({
   },
   labelContainer: {
     paddingHorizontal: 20,
-    paddingTop: 8,
+    paddingTop: 12,
   },
   labelEditRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
   labelInput: {
     flex: 1,
     borderWidth: 2,
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     fontWeight: '600',
+    minHeight: 48, // Senior-friendly touch target
   },
   saveButton: {
-    padding: 8,
+    padding: 12,
+    minHeight: 48,
+    minWidth: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   labelTouchable: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 12,
+    minHeight: 48, // Senior-friendly touch target
   },
   labelText: {
-    fontWeight: '500',
-    fontStyle: 'italic',
+    fontWeight: '600',
   },
   editIcon: {
-    marginLeft: 8,
+    marginLeft: 10,
   },
   headerInfo: {
     alignItems: 'center',
-    paddingTop: 4,
-    paddingBottom: 4,
+    paddingTop: 8,
+    paddingBottom: 8,
     paddingHorizontal: 20,
   },
   date: {
-    fontWeight: '600',
-    marginBottom: 2,
+    fontWeight: '700',
+    marginBottom: 4,
   },
-  duration: {},
+  duration: {
+    fontWeight: '500',
+  },
   playbackControls: {
     alignItems: 'center',
-    paddingVertical: 12,
-    gap: 8,
+    paddingVertical: 20,
+    gap: 16,
   },
   speedControlContainer: {
-    marginTop: 4,
+    marginTop: 8,
   },
   tabContainer: {
     paddingHorizontal: 20,
-    paddingTop: 4,
-    paddingBottom: 4,
+    paddingTop: 8,
+    paddingBottom: 12,
   },
   contentContainer: {
     flex: 1,
-    paddingHorizontal: 8,
+    paddingHorizontal: 12,
     minHeight: 200, // Ensure minimum height
   },
   viewWrapper: {
@@ -786,26 +823,32 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 24,
   },
   emptyText: {
     textAlign: 'center',
+    lineHeight: 28,
   },
   actionButtons: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
     paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 20,
+    paddingTop: 16,
+    paddingBottom: 24,
   },
   actionButton: {
     flex: 1,
+    minWidth: 120, // Ensure buttons don't get too narrow
   },
   notFoundContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 24,
   },
   notFoundText: {
     textAlign: 'center',
+    lineHeight: 28,
   },
 });
