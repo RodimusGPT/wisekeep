@@ -14,12 +14,14 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "xyz.generalize.wisekeep",
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "WiseKeep needs microphone access to record audio for you. 智守需要使用麥克風來為您錄音。",
         "UIBackgroundModes": [
           "audio"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -31,7 +33,8 @@
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.READ_EXTERNAL_STORAGE"
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -55,8 +58,10 @@
     },
     "extra": {
       "eas": {
-        "projectId": "wisekeep"
-      }
-    }
+        "projectId": "cedc2597-292b-4966-a03f-00bf4b2ebd42"
+      },
+      "router": {}
+    },
+    "owner": "projectrodimus"
   }
 }

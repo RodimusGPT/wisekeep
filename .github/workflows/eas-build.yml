@@ -1,4 +1,4 @@
-name: EAS Build
+name: EAS Build and Submit
 
 on:
   push:
@@ -6,12 +6,55 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - ios
+          - android
+      profile:
+        description: 'Build profile'
+        required: true
+        default: 'preview'
+        type: choice
+        options:
+          - preview
+          - production
+      submit:
+        description: 'Submit to stores after build'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
-  build:
-    name: Build App
+  lint:
+    name: Lint & Type Check
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+  build-android:
+    name: Build Android
+    needs: lint
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.platform == 'all' || github.event.inputs.platform == 'android'))
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -31,17 +74,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run TypeScript check
-        run: npx tsc --noEmit
+      - name: Determine build profile
+        id: profile
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "profile=${{ github.event.inputs.profile }}" >> $GITHUB_OUTPUT
+          else
+            echo "profile=preview" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Build preview (Android APK)
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        run: eas build --platform android --profile preview --non-interactive
+      - name: Build Android
+        env:
+          BUILD_PROFILE: ${{ steps.profile.outputs.profile }}
+        run: eas build --platform android --profile "$BUILD_PROFILE" --non-interactive
 
-  lint:
-    name: Lint & Type Check
+  build-ios:
+    name: Build iOS
+    needs: lint
     runs-on: ubuntu-latest
-
+    if: github.event_name == 'workflow_dispatch' && (github.event.inputs.platform == 'all' || github.event.inputs.platform == 'ios')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -52,8 +103,43 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
       - name: Install dependencies
         run: npm ci
 
-      - name: TypeScript check
-        run: npx tsc --noEmit
+      - name: Build iOS
+        env:
+          BUILD_PROFILE: ${{ github.event.inputs.profile }}
+        run: eas build --platform ios --profile "$BUILD_PROFILE" --non-interactive
+
+  submit-ios:
+    name: Submit iOS to TestFlight
+    needs: build-ios
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.submit == 'true' && (github.event.inputs.platform == 'all' || github.event.inputs.platform == 'ios')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Expo
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Submit to App Store Connect
+        run: eas submit --platform ios --latest --non-interactive
