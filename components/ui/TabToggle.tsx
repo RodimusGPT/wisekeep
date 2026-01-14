@@ -4,11 +4,11 @@ import {
   TouchableOpacity,
   Text,
   StyleSheet,
-  useColorScheme,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
+import { useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
 
 interface Tab {
@@ -23,8 +23,7 @@ interface TabToggleProps {
 }
 
 export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
   const handleTabPress = (key: string) => {
@@ -35,9 +34,9 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
   };
 
   const backgroundColor = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(0, 0, 0, 0.06)';
-  const activeBackgroundColor = isDark ? Colors.cardDark : '#FFFFFF';
-  const activeTextColor = isDark ? Colors.textDark : Colors.text;
-  const inactiveTextColor = isDark ? Colors.textTertiaryDark : Colors.textTertiary;
+  const activeBackgroundColor = isDark ? colors.card : '#FFFFFF';
+  const activeTextColor = colors.text;
+  const inactiveTextColor = colors.textTertiary;
   const activeBorderColor = Colors.primary;
 
   return (

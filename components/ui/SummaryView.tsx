@@ -4,12 +4,11 @@ import {
   Text,
   ScrollView,
   StyleSheet,
-  useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n } from '@/hooks';
+import { useI18n, useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
 
 interface SummaryViewProps {
@@ -18,16 +17,12 @@ interface SummaryViewProps {
 }
 
 export function SummaryView({ summary, tapNotesHint = true }: SummaryViewProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
   const { t } = useI18n();
 
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
+  const { text: textColor, textSecondary: secondaryColor, card: cardBackground, border: borderColor } = colors;
   const bulletColor = Colors.primary;
-  const cardBackground = isDark ? Colors.cardDark : Colors.card;
-  const borderColor = isDark ? Colors.borderDark : Colors.border;
 
   return (
     <ScrollView

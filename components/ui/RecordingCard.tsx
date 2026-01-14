@@ -4,13 +4,12 @@ import {
   View,
   Text,
   StyleSheet,
-  useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n } from '@/hooks';
+import { useI18n, useTheme } from '@/hooks';
 import { Recording, getFontSize } from '@/types';
 import { format, isToday, isYesterday, differenceInDays } from 'date-fns';
 
@@ -20,8 +19,7 @@ interface RecordingCardProps {
 }
 
 export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardProps) => {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
   const { t } = useI18n();
 
@@ -100,11 +98,7 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
     }
   }, [recording.status, t.processingStatus, t.error, isDark]);
 
-  const backgroundColor = isDark ? Colors.cardDark : Colors.card;
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
-  const borderColor = isDark ? Colors.borderDark : Colors.border;
-  const chevronColor = isDark ? Colors.textTertiaryDark : Colors.textTertiary;
+  const { card: backgroundColor, text: textColor, textSecondary: secondaryColor, border: borderColor, textTertiary: chevronColor } = colors;
 
   return (
     <TouchableOpacity
@@ -196,24 +190,11 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
               </View>
             ) : null}
 
-            {/* Status indicators */}
-            <View style={styles.indicators}>
-              {recording.notes && recording.notes.length > 0 && (
+            {/* Status indicator - combined notes & summary */}
+            {((recording.notes && recording.notes.length > 0) || (recording.summary && recording.summary.length > 0)) && (
+              <View style={styles.indicators}>
                 <View style={[styles.indicator, { backgroundColor: isDark ? 'rgba(46, 125, 50, 0.2)' : 'rgba(46, 125, 50, 0.1)' }]}>
                   <Ionicons name="document-text" size={18} color={Colors.success} />
-                  <Text
-                    style={[
-                      styles.indicatorText,
-                      { color: Colors.success, fontSize: getFontSize('small', textSize) },
-                    ]}
-                  >
-                    {t.notesReady}
-                  </Text>
-                </View>
-              )}
-              {recording.summary && recording.summary.length > 0 && (
-                <View style={[styles.indicator, { backgroundColor: isDark ? 'rgba(46, 125, 50, 0.2)' : 'rgba(46, 125, 50, 0.1)' }]}>
-                  <Ionicons name="list" size={18} color={Colors.success} />
                   <Text
                     style={[
                       styles.indicatorText,
@@ -223,8 +204,8 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
                     {t.summaryReady}
                   </Text>
                 </View>
-              )}
-            </View>
+              </View>
+            )}
           </View>
         </View>
 

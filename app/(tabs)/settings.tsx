@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   SafeAreaView,
-  useColorScheme,
   ScrollView,
   Modal,
   TouchableOpacity,
@@ -17,14 +16,13 @@ import * as Clipboard from 'expo-clipboard';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n, useAuth, usePurchases } from '@/hooks';
+import { useI18n, useAuth, usePurchases, useTheme } from '@/hooks';
 import { SettingsItem, BigButton } from '@/components/ui';
 import { getFontSize, TextSize } from '@/types';
 import { Language } from '@/i18n/translations';
 
 export default function SettingsScreen() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, colors } = useTheme();
 
   const { t, language, setLanguage } = useI18n();
   const { settings, setTextSize } = useAppStore();
@@ -42,10 +40,7 @@ export default function SettingsScreen() {
   const [showTextSizeModal, setShowTextSizeModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
 
-  const backgroundColor = isDark ? Colors.backgroundDark : Colors.background;
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
-  const cardBackground = isDark ? Colors.cardDark : Colors.card;
+  const { background: backgroundColor, text: textColor, textSecondary: secondaryColor, card: cardBackground } = colors;
 
   // Get support code from user profile (stored in database)
   const supportCode = user?.supportCode ?? null;

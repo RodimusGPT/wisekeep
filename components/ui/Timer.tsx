@@ -1,7 +1,8 @@
 import React from 'react';
-import { Text, StyleSheet, View, useColorScheme } from 'react-native';
+import { Text, StyleSheet, View } from 'react-native';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
+import { useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
 
 interface TimerProps {
@@ -11,8 +12,7 @@ interface TimerProps {
 }
 
 export function Timer({ seconds, isRecording = false, label }: TimerProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
   // Format time as HH:MM:SS or MM:SS
@@ -32,11 +32,7 @@ export function Timer({ seconds, isRecording = false, label }: TimerProps) {
       .padStart(2, '0')}`;
   };
 
-  const textColor = isRecording
-    ? Colors.recordingActive
-    : isDark
-    ? Colors.textDark
-    : Colors.text;
+  const textColor = isRecording ? Colors.recordingActive : colors.text;
 
   return (
     <View style={styles.container}>

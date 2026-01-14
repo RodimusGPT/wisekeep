@@ -173,37 +173,41 @@ export function useRecording(): UseRecordingReturn {
           const mediaRecorder = webRecorderRef.current!;
 
           mediaRecorder.onstop = () => {
-            // Stop all tracks
+            // Stop all tracks immediately
             if (webStreamRef.current) {
               webStreamRef.current.getTracks().forEach(track => track.stop());
               webStreamRef.current = null;
             }
 
-            // Create blob from chunks
-            const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
-            const audioUri = URL.createObjectURL(blob);
+            // Defer heavy work to avoid blocking the 'stop' event handler
+            // This prevents the "[Violation] 'stop' handler took Xms" warning
+            queueMicrotask(() => {
+              // Create blob from chunks
+              const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
+              const audioUri = URL.createObjectURL(blob);
 
-            // Create recording object
-            const newRecording: Recording = {
-              id: recordingId,
-              createdAt: new Date().toISOString(),
-              duration: finalDuration,
-              audioUri: audioUri,
-              status: 'recorded', // Will be uploaded next, not processing yet
-              language: settings.language,
-            };
+              // Create recording object
+              const newRecording: Recording = {
+                id: recordingId,
+                createdAt: new Date().toISOString(),
+                duration: finalDuration,
+                audioUri: audioUri,
+                status: 'recorded', // Will be uploaded next, not processing yet
+                language: settings.language,
+              };
 
-            // Add to store
-            addRecording(newRecording);
+              // Add to store
+              addRecording(newRecording);
 
-            // Reset state
-            webRecorderRef.current = null;
-            webChunksRef.current = [];
-            setIsRecording(false);
-            setDuration(0);
-            setMetering(0);
+              // Reset state
+              webRecorderRef.current = null;
+              webChunksRef.current = [];
+              setIsRecording(false);
+              setDuration(0);
+              setMetering(0);
 
-            resolve(newRecording);
+              resolve(newRecording);
+            });
           };
 
           mediaRecorder.onerror = (event) => {

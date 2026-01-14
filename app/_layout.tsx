@@ -120,6 +120,15 @@ function RootLayoutNav() {
             headerStyle: {
               backgroundColor: isDark ? Colors.backgroundDark : Colors.background,
             },
+            headerLeft: () => (
+              <Ionicons
+                name="arrow-back"
+                size={28}
+                color={Colors.primary}
+                onPress={() => router.back()}
+                style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+              />
+            ),
           }}
         />
       </Stack>

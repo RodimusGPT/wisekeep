@@ -4,12 +4,12 @@ import {
   View,
   Text,
   StyleSheet,
-  useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
+import { useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
 
 interface SettingsItemProps {
@@ -27,8 +27,7 @@ export function SettingsItem({
   onPress,
   showChevron = true,
 }: SettingsItemProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
   const handlePress = () => {
@@ -36,10 +35,7 @@ export function SettingsItem({
     onPress();
   };
 
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
-  const backgroundColor = isDark ? Colors.cardDark : Colors.card;
-  const borderColor = isDark ? Colors.borderDark : Colors.border;
+  const { text: textColor, textSecondary: secondaryColor, card: backgroundColor, border: borderColor } = colors;
 
   return (
     <TouchableOpacity

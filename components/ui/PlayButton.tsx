@@ -1,8 +1,9 @@
 import React from 'react';
-import { TouchableOpacity, StyleSheet, View, useColorScheme } from 'react-native';
+import { TouchableOpacity, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
+import { useTheme } from '@/hooks';
 
 interface PlayButtonProps {
   isPlaying: boolean;
@@ -12,8 +13,7 @@ interface PlayButtonProps {
 }
 
 export function PlayButton({ isPlaying, onPress, size = 'large', disabled = false }: PlayButtonProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark } = useTheme();
 
   const handlePress = () => {
     if (disabled) return;

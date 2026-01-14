@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, TouchableOpacity, Text, StyleSheet, useColorScheme } from 'react-native';
+import { View, TouchableOpacity, Text, StyleSheet } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
+import { useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
 
 interface SpeedToggleProps {
@@ -18,8 +19,7 @@ export function SpeedToggle({
   normalLabel,
   slowLabel,
 }: SpeedToggleProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
   const handlePress = (newSpeed: 'normal' | 'slow') => {
@@ -29,10 +29,9 @@ export function SpeedToggle({
     }
   };
 
+  // backgroundSecondary not in theme, use direct Colors access
   const backgroundColor = isDark ? Colors.backgroundSecondaryDark : Colors.backgroundSecondary;
-  const activeBackgroundColor = isDark ? Colors.cardDark : Colors.card;
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const borderColor = isDark ? Colors.borderDark : Colors.border;
+  const { card: activeBackgroundColor, text: textColor, border: borderColor } = colors;
 
   return (
     <View style={[styles.container, { backgroundColor }]}>

@@ -1,21 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   TextInput,
   StyleSheet,
   SafeAreaView,
-  useColorScheme,
   Alert,
   TouchableOpacity,
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { format } from 'date-fns';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n, useAudioPlayer } from '@/hooks';
+import { useI18n, useAudioPlayer, useTheme } from '@/hooks';
 import {
   PlayButton,
   SpeedToggle,
@@ -31,6 +31,7 @@ import { File } from 'expo-file-system/next';
 import {
   checkComprehensiveUsage,
   processRecording as processRecordingApi,
+  summarizeRecording as summarizeRecordingApi,
   fetchRecordingById,
   ComprehensiveUsage,
 } from '@/services/supabase';
@@ -39,8 +40,7 @@ import { useAuth } from '@/hooks';
 type ViewTab = 'summary' | 'notes';
 
 export default function RecordingDetailScreen() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, colors } = useTheme();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
 
@@ -77,9 +77,20 @@ export default function RecordingDetailScreen() {
     unloadAudio,
   } = useAudioPlayer();
 
-  const backgroundColor = isDark ? Colors.backgroundDark : Colors.background;
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
+  const { background: backgroundColor, text: textColor, textSecondary: secondaryColor } = colors;
+
+  // Stop playback when navigating away from the screen
+  // This is important for senior users who might get confused by audio playing in the background
+  useFocusEffect(
+    useCallback(() => {
+      // Screen focused - do nothing (audio continues if it was playing)
+      return () => {
+        // Screen unfocused (navigating away) - stop playback
+        console.log('[Detail] Screen unfocused, pausing audio');
+        pause();
+      };
+    }, [pause])
+  );
 
   // Load audio when recording changes
   useEffect(() => {
@@ -486,17 +497,34 @@ export default function RecordingDetailScreen() {
               updateRecording(recording.id, { status: 'processing_summary' });
 
               // Call the summarization API
-              // Note: We need to create a new Edge Function for summarization only
-              // For now, we'll call the same processRecording API
-              // TODO: Create a separate summarize-only Edge Function
+              const result = await summarizeRecordingApi(
+                recording.id,
+                user.id,
+                settings.language
+              );
 
-              // Refresh usage
-              const newUsage = await checkComprehensiveUsage(user.id);
-              setUsage(newUsage);
+              if (!result.success) {
+                console.error('Summarization failed:', result.error);
+                Alert.alert(t.error, result.error || t.tryAgain);
+                updateRecording(recording.id, { status: 'ready' });
+                setIsProcessing(false);
+                return;
+              }
+
+              // Fetch the updated recording to get the summary
+              const updatedRecording = await fetchRecordingById(recording.id);
+              if (updatedRecording) {
+                updateRecording(recording.id, {
+                  status: updatedRecording.status as any,
+                  summary: updatedRecording.summary as any,
+                });
+              }
+
+              setIsProcessing(false);
             } catch (error) {
               console.error('Summarization error:', error);
               Alert.alert(t.error, error instanceof Error ? error.message : t.tryAgain);
-              updateRecording(recording.id, { status: 'notes_ready' });
+              updateRecording(recording.id, { status: 'ready' });
               setIsProcessing(false);
             }
           },
@@ -652,6 +680,18 @@ export default function RecordingDetailScreen() {
               onLinePress={handleNoteLinePress}
               currentTimestamp={position}
             />
+          </View>
+        ) : activeTab === 'summary' && hasNotes && !hasSummary ? (
+          // Notes exist but no summary - show helpful message
+          <View style={styles.emptyContent}>
+            <Text
+              style={[
+                styles.emptyText,
+                { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+              ]}
+            >
+              {t.noSummaryYet || '尚未產生摘要，請點擊「整理重點」按鈕'}
+            </Text>
           </View>
         ) : (
           <View style={styles.emptyContent}>

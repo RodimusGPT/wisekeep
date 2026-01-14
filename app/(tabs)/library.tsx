@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   SafeAreaView,
-  useColorScheme,
   FlatList,
   TextInput,
 } from 'react-native';
@@ -12,13 +11,12 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n } from '@/hooks';
+import { useI18n, useTheme } from '@/hooks';
 import { RecordingCard } from '@/components/ui';
 import { getFontSize, Recording } from '@/types';
 
 export default function LibraryScreen() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, colors } = useTheme();
   const router = useRouter();
 
   const { t } = useI18n();
@@ -27,11 +25,8 @@ export default function LibraryScreen() {
 
   const [searchQuery, setSearchQuery] = useState('');
 
-  const backgroundColor = isDark ? Colors.backgroundDark : Colors.background;
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
+  const { background: backgroundColor, text: textColor, textSecondary: secondaryColor, border: borderColor } = colors;
   const inputBackgroundColor = isDark ? Colors.backgroundSecondaryDark : Colors.backgroundSecondary;
-  const borderColor = isDark ? Colors.borderDark : Colors.border;
 
   // Filter recordings based on search query
   const filteredRecordings = useMemo(() => {

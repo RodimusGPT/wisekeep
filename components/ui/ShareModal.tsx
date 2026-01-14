@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  useColorScheme,
   Pressable,
   Platform,
 } from 'react-native';
@@ -14,18 +13,48 @@ import * as Clipboard from 'expo-clipboard';
 import { Colors } from '@/constants/Colors';
 
 import { useAppStore } from '@/store';
-import { useI18n } from '@/hooks';
+import { useI18n, useTheme } from '@/hooks';
 import { Recording, getFontSize } from '@/types';
 import { BigButton } from './BigButton';
 
 // Cache for converted MP3 files (persists for browser session)
 const mp3Cache = new Map<string, Blob>();
 
+// Target sample rate for MP3 encoding (lamejs works best with standard rates)
+const TARGET_SAMPLE_RATE = 44100;
+
+// Resample audio data to target sample rate
+function resampleAudio(
+  samples: Float32Array,
+  fromRate: number,
+  toRate: number
+): Float32Array {
+  if (fromRate === toRate) {
+    return samples;
+  }
+
+  const ratio = fromRate / toRate;
+  const newLength = Math.round(samples.length / ratio);
+  const result = new Float32Array(newLength);
+
+  for (let i = 0; i < newLength; i++) {
+    const srcIndex = i * ratio;
+    const srcIndexFloor = Math.floor(srcIndex);
+    const srcIndexCeil = Math.min(srcIndexFloor + 1, samples.length - 1);
+    const t = srcIndex - srcIndexFloor;
+
+    // Linear interpolation
+    result[i] = samples[srcIndexFloor] * (1 - t) + samples[srcIndexCeil] * t;
+  }
+
+  return result;
+}
+
 // Convert WebM audio to MP3 for better compatibility
 async function convertToMp3(recordingId: string, audioUrl: string): Promise<Blob> {
-  // Check cache first
+  // Check cache first (verify it's actually MP3)
   const cached = mp3Cache.get(recordingId);
-  if (cached) {
+  if (cached && cached.type === 'audio/mpeg') {
     console.log('[MP3] Using cached MP3 for:', recordingId);
     return cached;
   }
@@ -38,15 +67,23 @@ async function convertToMp3(recordingId: string, audioUrl: string): Promise<Blob
   const response = await fetch(audioUrl);
   if (!response.ok) throw new Error('Failed to fetch audio');
   const arrayBuffer = await response.arrayBuffer();
+  console.log('[MP3] Fetched audio, size:', arrayBuffer.byteLength);
 
   // Decode the audio using Web Audio API
   const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
   const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
   // Get audio data
-  const numChannels = audioBuffer.numberOfChannels;
-  const sampleRate = audioBuffer.sampleRate;
-  const samples = audioBuffer.getChannelData(0); // Get mono channel
+  const originalSampleRate = audioBuffer.sampleRate;
+  let samples = audioBuffer.getChannelData(0); // Get mono channel
+  console.log('[MP3] Original sample rate:', originalSampleRate, 'samples:', samples.length);
+
+  // Resample to standard rate if needed (lamejs works best with 44100)
+  if (originalSampleRate !== TARGET_SAMPLE_RATE) {
+    console.log('[MP3] Resampling from', originalSampleRate, 'to', TARGET_SAMPLE_RATE);
+    samples = resampleAudio(samples, originalSampleRate, TARGET_SAMPLE_RATE);
+    console.log('[MP3] Resampled samples:', samples.length);
+  }
 
   // Convert Float32Array to Int16Array for lamejs
   const int16Samples = new Int16Array(samples.length);
@@ -55,8 +92,8 @@ async function convertToMp3(recordingId: string, audioUrl: string): Promise<Blob
     int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
   }
 
-  // Create MP3 encoder (mono, sample rate, 128kbps)
-  const mp3Encoder = new Mp3Encoder(1, sampleRate, 128);
+  // Create MP3 encoder (mono, 44100 Hz, 128kbps)
+  const mp3Encoder = new Mp3Encoder(1, TARGET_SAMPLE_RATE, 128);
 
   // Encode in chunks
   const mp3Data: Uint8Array[] = [];
@@ -80,12 +117,21 @@ async function convertToMp3(recordingId: string, audioUrl: string): Promise<Blob
   // Close audio context
   await audioContext.close();
 
-  // Create MP3 blob - cast to BlobPart[] for TypeScript compatibility
-  const mp3Blob = new Blob(mp3Data as BlobPart[], { type: 'audio/mp3' });
+  // Calculate total size
+  const totalSize = mp3Data.reduce((sum, chunk) => sum + chunk.length, 0);
+  console.log('[MP3] Encoded MP3 size:', totalSize, 'bytes, chunks:', mp3Data.length);
+
+  // Verify we got actual MP3 data
+  if (totalSize < 1000) {
+    throw new Error('MP3 encoding produced insufficient data');
+  }
+
+  // Create MP3 blob with correct MIME type
+  const mp3Blob = new Blob(mp3Data as BlobPart[], { type: 'audio/mpeg' });
 
   // Cache for future shares
   mp3Cache.set(recordingId, mp3Blob);
-  console.log('[MP3] Cached MP3 for:', recordingId);
+  console.log('[MP3] Cached MP3 for:', recordingId, 'size:', mp3Blob.size);
 
   return mp3Blob;
 }
@@ -98,17 +144,14 @@ interface ShareModalProps {
 }
 
 export function ShareModal({ visible, recording, onClose, onCopied }: ShareModalProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
   const { t } = useI18n();
 
   // State for in-app alert dialog
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
 
-  const backgroundColor = isDark ? Colors.cardDark : Colors.card;
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
+  const { card: backgroundColor, text: textColor, textSecondary: secondaryColor } = colors;
 
   // Generate summary text for sharing
   const getSummaryText = (): string => {

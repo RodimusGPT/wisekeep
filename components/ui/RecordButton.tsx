@@ -5,7 +5,6 @@ import {
   Text,
   StyleSheet,
   Animated,
-  useColorScheme,
   Dimensions,
   Platform,
 } from 'react-native';
@@ -13,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
+import { useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -26,8 +26,7 @@ interface RecordButtonProps {
 }
 
 export function RecordButton({ isRecording, onPress, label }: RecordButtonProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
   // Pulsing animation for recording state
@@ -42,12 +41,12 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
           Animated.timing(pulseAnim, {
             toValue: 1.08,
             duration: 800,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(pulseAnim, {
             toValue: 1,
             duration: 800,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ])
       );
@@ -57,12 +56,12 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
           Animated.timing(ringAnim, {
             toValue: 1,
             duration: 1200,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(ringAnim, {
             toValue: 0,
             duration: 1200,
-            useNativeDriver: true,
+            useNativeDriver: Platform.OS !== 'web',
           }),
         ])
       );
@@ -185,7 +184,7 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
           style={[
             styles.label,
             {
-              color: isRecording ? Colors.recordingActive : (isDark ? Colors.textDark : Colors.text),
+              color: isRecording ? Colors.recordingActive : colors.text,
               fontSize: getFontSize('bodyLarge', textSize),
             },
           ]}

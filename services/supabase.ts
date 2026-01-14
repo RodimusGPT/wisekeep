@@ -540,6 +540,47 @@ export async function processRecording(
   }
 }
 
+/**
+ * Summarize an existing recording that has notes but no summary
+ * This is a free operation (doesn't consume AI minutes)
+ */
+export async function summarizeRecording(
+  recordingId: string,
+  userId: string,
+  language: string
+): Promise<{
+  success: boolean;
+  error?: string;
+  summaryPoints?: number;
+}> {
+  console.log('[API] summarizeRecording called:', { recordingId, userId, language });
+
+  try {
+    const { data, error } = await supabase.functions.invoke('summarize-recording', {
+      body: {
+        recording_id: recordingId,
+        user_id: userId,
+        language,
+      },
+    });
+
+    if (error) {
+      console.error('Error summarizing recording:', error);
+      return { success: false, error: error.message || 'Summarization failed' };
+    }
+
+    if (data?.error) {
+      console.error('Summarization returned error:', data.error, data.message);
+      return { success: false, error: data.message || data.error };
+    }
+
+    return { success: true, summaryPoints: data?.summary_points };
+  } catch (err) {
+    console.error('Exception in summarizeRecording:', err);
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
+}
+
 // ============================================
 // Recordings Database
 // ============================================

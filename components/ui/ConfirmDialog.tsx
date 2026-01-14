@@ -4,13 +4,13 @@ import {
   View,
   Text,
   StyleSheet,
-  useColorScheme,
   TouchableOpacity,
   Pressable,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
+import { useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
 import { BigButton } from './BigButton';
 
@@ -35,13 +35,10 @@ export function ConfirmDialog({
   onCancel,
   variant = 'danger',
 }: ConfirmDialogProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
-  const backgroundColor = isDark ? Colors.cardDark : Colors.card;
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
+  const { card: backgroundColor, text: textColor, textSecondary: secondaryColor } = colors;
 
   const handleConfirm = () => {
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);

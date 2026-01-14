@@ -5,13 +5,12 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  useColorScheme,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n } from '@/hooks';
+import { useI18n, useTheme } from '@/hooks';
 import { NoteLine, getFontSize } from '@/types';
 
 interface NotesViewProps {
@@ -21,8 +20,7 @@ interface NotesViewProps {
 }
 
 export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
   const { t } = useI18n();
 
@@ -56,10 +54,7 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
     return currentSeconds >= lineStart && currentSeconds < lineEnd;
   };
 
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
-  const highlightBackground = isDark ? Colors.highlightDark : Colors.highlight;
-  const borderColor = isDark ? Colors.borderDark : Colors.border;
+  const { text: textColor, textSecondary: secondaryColor, highlight: highlightBackground, border: borderColor } = colors;
 
   return (
     <ScrollView

@@ -4,17 +4,17 @@ import {
   Text,
   StyleSheet,
   SafeAreaView,
-  useColorScheme,
   ScrollView,
   Alert,
   Animated,
   Easing,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
-import { useI18n, useRecording, useAuth } from '@/hooks';
+import { useI18n, useRecording, useAuth, useTheme } from '@/hooks';
 import {
   RecordButton,
   Timer,
@@ -32,8 +32,7 @@ import {
 } from '@/services/supabase';
 
 export default function HomeScreen() {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark, colors } = useTheme();
   const router = useRouter();
 
   const { t } = useI18n();
@@ -72,7 +71,7 @@ export default function HomeScreen() {
           toValue: 1,
           duration: 1500,
           easing: Easing.linear,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         })
       );
       spin.start();
@@ -91,9 +90,7 @@ export default function HomeScreen() {
     }
   }, [processingId]);
 
-  const backgroundColor = isDark ? Colors.backgroundDark : Colors.background;
-  const textColor = isDark ? Colors.textDark : Colors.text;
-  const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
+  const { background: backgroundColor, text: textColor, textSecondary: secondaryColor } = colors;
 
   // Memoize recent recordings (last 3)
   const recentRecordings = useMemo(() => recordings.slice(0, 3), [recordings]);

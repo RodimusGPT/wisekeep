@@ -56,6 +56,7 @@ export interface Translations {
   transcribePromptMessage: string;
   summarizePromptTitle: string;
   summarizePromptMessage: string;
+  noSummaryYet: string;
   aiMinutesRemaining: string;
   unlimited: string;
 
@@ -209,6 +210,7 @@ export const translations: Record<Language, Translations> = {
     transcribePromptMessage: '這將使用約 {minutes} 分鐘的 AI 處理額度。',
     summarizePromptTitle: '整理重點',
     summarizePromptMessage: '將根據文字筆記整理重點。此功能不消耗 AI 額度。',
+    noSummaryYet: '尚未產生摘要，請點擊下方「整理重點」按鈕',
     aiMinutesRemaining: '剩餘額度：{remaining} 分鐘',
     unlimited: '無限',
 
@@ -224,7 +226,7 @@ export const translations: Record<Language, Translations> = {
     search: '搜尋',
     searchPlaceholder: '搜尋錄音...',
     notesReady: '筆記完成',
-    summaryReady: '摘要完成',
+    summaryReady: '重點摘要',
     processingStatus: '處理中',
 
     // Sharing
@@ -361,6 +363,7 @@ export const translations: Record<Language, Translations> = {
     transcribePromptMessage: 'This will use approximately {minutes} minutes of AI processing.',
     summarizePromptTitle: 'Start Summarization',
     summarizePromptMessage: 'Generate summary from transcript. Summarization is free.',
+    noSummaryYet: 'No summary yet. Tap "Summarize" below to generate.',
     aiMinutesRemaining: 'Remaining: {remaining} minutes',
     unlimited: 'Unlimited',
 
@@ -376,7 +379,7 @@ export const translations: Record<Language, Translations> = {
     search: 'Search',
     searchPlaceholder: 'Search recordings...',
     notesReady: 'Notes Ready',
-    summaryReady: 'Summary Ready',
+    summaryReady: 'Summary',
     processingStatus: 'Processing',
 
     // Sharing

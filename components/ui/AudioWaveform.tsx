@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
-import { View, StyleSheet, Animated, useColorScheme } from 'react-native';
+import { View, StyleSheet, Animated, Platform } from 'react-native';
 import { Colors } from '@/constants/Colors';
+import { useTheme } from '@/hooks';
 
 interface AudioWaveformProps {
   metering: number; // 0-1 scale
@@ -13,8 +14,7 @@ export function AudioWaveform({
   isActive,
   barCount = 5,
 }: AudioWaveformProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { colors } = useTheme();
 
   // Create animated values for each bar
   const barAnims = useRef(
@@ -35,7 +35,7 @@ export function AudioWaveform({
         Animated.timing(anim, {
           toValue: targetHeight,
           duration: 100,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }).start();
       });
     } else {
@@ -44,17 +44,13 @@ export function AudioWaveform({
         Animated.timing(anim, {
           toValue: 0.3,
           duration: 300,
-          useNativeDriver: true,
+          useNativeDriver: Platform.OS !== 'web',
         }).start();
       });
     }
   }, [metering, isActive, barAnims]);
 
-  const barColor = isActive
-    ? Colors.recordingActive
-    : isDark
-    ? Colors.textTertiaryDark
-    : Colors.textTertiary;
+  const barColor = isActive ? Colors.recordingActive : colors.textTertiary;
 
   return (
     <View style={styles.container}>

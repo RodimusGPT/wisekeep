@@ -5,13 +5,13 @@ import {
   StyleSheet,
   ViewStyle,
   TextStyle,
-  useColorScheme,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
+import { useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
 
 interface BigButtonProps {
@@ -35,8 +35,7 @@ export function BigButton({
   size = 'normal',
   icon,
 }: BigButtonProps) {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === 'dark';
+  const { isDark } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
   const handlePress = () => {
