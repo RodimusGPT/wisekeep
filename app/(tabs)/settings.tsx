@@ -8,7 +8,7 @@ import {
   ScrollView,
   Modal,
   TouchableOpacity,
-  TouchableWithoutFeedback,
+  Pressable,
   Platform,
   Alert,
   ActivityIndicator,
@@ -332,72 +332,70 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setShowLanguageModal(false)}
       >
-        <TouchableWithoutFeedback onPress={() => setShowLanguageModal(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.modalContent, { backgroundColor: cardBackground }]}>
-                <View style={styles.modalHandle} />
+        <Pressable style={styles.modalOverlay} onPress={() => setShowLanguageModal(false)}>
+          <Pressable>
+            <View style={[styles.modalContent, { backgroundColor: cardBackground }]}>
+              <View style={styles.modalHandle} />
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: textColor, fontSize: getFontSize('header', textSize) },
+                ]}
+              >
+                {t.language}
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.optionButton,
+                  language === 'zh-TW' && styles.optionButtonActive,
+                ]}
+                onPress={() => handleLanguageSelect('zh-TW')}
+              >
+                <Text style={styles.optionFlag}>🇹🇼</Text>
                 <Text
                   style={[
-                    styles.modalTitle,
-                    { color: textColor, fontSize: getFontSize('header', textSize) },
+                    styles.optionText,
+                    { color: textColor, fontSize: getFontSize('body', textSize) },
                   ]}
                 >
-                  {t.language}
+                  繁體中文
                 </Text>
+                {language === 'zh-TW' && (
+                  <Ionicons name="checkmark" size={24} color={Colors.primary} />
+                )}
+              </TouchableOpacity>
 
-                <TouchableOpacity
+              <TouchableOpacity
+                style={[
+                  styles.optionButton,
+                  language === 'en' && styles.optionButtonActive,
+                ]}
+                onPress={() => handleLanguageSelect('en')}
+              >
+                <Text style={styles.optionFlag}>🇺🇸</Text>
+                <Text
                   style={[
-                    styles.optionButton,
-                    language === 'zh-TW' && styles.optionButtonActive,
+                    styles.optionText,
+                    { color: textColor, fontSize: getFontSize('body', textSize) },
                   ]}
-                  onPress={() => handleLanguageSelect('zh-TW')}
                 >
-                  <Text style={styles.optionFlag}>🇹🇼</Text>
-                  <Text
-                    style={[
-                      styles.optionText,
-                      { color: textColor, fontSize: getFontSize('body', textSize) },
-                    ]}
-                  >
-                    繁體中文
-                  </Text>
-                  {language === 'zh-TW' && (
-                    <Ionicons name="checkmark" size={24} color={Colors.primary} />
-                  )}
-                </TouchableOpacity>
+                  English
+                </Text>
+                {language === 'en' && (
+                  <Ionicons name="checkmark" size={24} color={Colors.primary} />
+                )}
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[
-                    styles.optionButton,
-                    language === 'en' && styles.optionButtonActive,
-                  ]}
-                  onPress={() => handleLanguageSelect('en')}
-                >
-                  <Text style={styles.optionFlag}>🇺🇸</Text>
-                  <Text
-                    style={[
-                      styles.optionText,
-                      { color: textColor, fontSize: getFontSize('body', textSize) },
-                    ]}
-                  >
-                    English
-                  </Text>
-                  {language === 'en' && (
-                    <Ionicons name="checkmark" size={24} color={Colors.primary} />
-                  )}
-                </TouchableOpacity>
-
-                <BigButton
-                  title={t.cancel}
-                  onPress={() => setShowLanguageModal(false)}
-                  variant="secondary"
-                  style={styles.cancelButton}
-                />
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              <BigButton
+                title={t.cancel}
+                onPress={() => setShowLanguageModal(false)}
+                variant="secondary"
+                style={styles.cancelButton}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Text Size Modal */}
@@ -407,68 +405,66 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setShowTextSizeModal(false)}
       >
-        <TouchableWithoutFeedback onPress={() => setShowTextSizeModal(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.modalContent, { backgroundColor: cardBackground }]}>
-                <View style={styles.modalHandle} />
+        <Pressable style={styles.modalOverlay} onPress={() => setShowTextSizeModal(false)}>
+          <Pressable>
+            <View style={[styles.modalContent, { backgroundColor: cardBackground }]}>
+              <View style={styles.modalHandle} />
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: textColor, fontSize: getFontSize('header', textSize) },
+                ]}
+              >
+                {t.textSize}
+              </Text>
+
+              {/* Text Size Preview */}
+              <View style={styles.previewContainer}>
                 <Text
                   style={[
-                    styles.modalTitle,
-                    { color: textColor, fontSize: getFontSize('header', textSize) },
+                    styles.previewText,
+                    { color: secondaryColor, fontSize: getFontSize('body', textSize) },
                   ]}
                 >
-                  {t.textSize}
+                  {t.tagline}
                 </Text>
+              </View>
 
-                {/* Text Size Preview */}
-                <View style={styles.previewContainer}>
+              {(['small', 'medium', 'large'] as TextSize[]).map((size) => (
+                <TouchableOpacity
+                  key={size}
+                  style={[
+                    styles.optionButton,
+                    textSize === size && styles.optionButtonActive,
+                  ]}
+                  onPress={() => handleTextSizeSelect(size)}
+                >
                   <Text
                     style={[
-                      styles.previewText,
-                      { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+                      styles.sizePreviewText,
+                      {
+                        color: textColor,
+                        fontSize: getFontSize('body', size),
+                      },
                     ]}
                   >
-                    {t.tagline}
+                    {getTextSizeDisplay(size)}
                   </Text>
-                </View>
+                  {textSize === size && (
+                    <Ionicons name="checkmark" size={24} color={Colors.primary} />
+                  )}
+                </TouchableOpacity>
+              ))}
 
-                {(['small', 'medium', 'large'] as TextSize[]).map((size) => (
-                  <TouchableOpacity
-                    key={size}
-                    style={[
-                      styles.optionButton,
-                      textSize === size && styles.optionButtonActive,
-                    ]}
-                    onPress={() => handleTextSizeSelect(size)}
-                  >
-                    <Text
-                      style={[
-                        styles.sizePreviewText,
-                        {
-                          color: textColor,
-                          fontSize: getFontSize('body', size),
-                        },
-                      ]}
-                    >
-                      {getTextSizeDisplay(size)}
-                    </Text>
-                    {textSize === size && (
-                      <Ionicons name="checkmark" size={24} color={Colors.primary} />
-                    )}
-                  </TouchableOpacity>
-                ))}
-
-                <BigButton
-                  title={t.cancel}
-                  onPress={() => setShowTextSizeModal(false)}
-                  variant="secondary"
-                  style={styles.cancelButton}
-                />
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              <BigButton
+                title={t.cancel}
+                onPress={() => setShowTextSizeModal(false)}
+                variant="secondary"
+                style={styles.cancelButton}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* About Modal */}
@@ -478,63 +474,61 @@ export default function SettingsScreen() {
         animationType="slide"
         onRequestClose={() => setShowAboutModal(false)}
       >
-        <TouchableWithoutFeedback onPress={() => setShowAboutModal(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.modalContent, { backgroundColor: cardBackground }]}>
-                <View style={styles.modalHandle} />
+        <Pressable style={styles.modalOverlay} onPress={() => setShowAboutModal(false)}>
+          <Pressable>
+            <View style={[styles.modalContent, { backgroundColor: cardBackground }]}>
+              <View style={styles.modalHandle} />
 
-                {/* Logo */}
-                <View style={styles.aboutLogo}>
-                  <Ionicons name="mic" size={48} color="#FFFFFF" />
-                </View>
-
-                <Text
-                  style={[
-                    styles.aboutAppName,
-                    { color: textColor, fontSize: getFontSize('headerLarge', textSize) },
-                  ]}
-                >
-                  {t.appName}
-                </Text>
-
-                <Text
-                  style={[
-                    styles.aboutTagline,
-                    { color: Colors.primary, fontSize: getFontSize('body', textSize) },
-                  ]}
-                >
-                  {t.tagline}
-                </Text>
-
-                <Text
-                  style={[
-                    styles.aboutVersion,
-                    { color: secondaryColor, fontSize: getFontSize('small', textSize) },
-                  ]}
-                >
-                  {t.version} 1.0.0
-                </Text>
-
-                <Text
-                  style={[
-                    styles.aboutDescription,
-                    { color: secondaryColor, fontSize: getFontSize('body', textSize) },
-                  ]}
-                >
-                  {t.welcomeTagline}
-                </Text>
-
-                <BigButton
-                  title={t.cancel}
-                  onPress={() => setShowAboutModal(false)}
-                  variant="secondary"
-                  style={styles.cancelButton}
-                />
+              {/* Logo */}
+              <View style={styles.aboutLogo}>
+                <Ionicons name="mic" size={48} color="#FFFFFF" />
               </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+
+              <Text
+                style={[
+                  styles.aboutAppName,
+                  { color: textColor, fontSize: getFontSize('headerLarge', textSize) },
+                ]}
+              >
+                {t.appName}
+              </Text>
+
+              <Text
+                style={[
+                  styles.aboutTagline,
+                  { color: Colors.primary, fontSize: getFontSize('body', textSize) },
+                ]}
+              >
+                {t.tagline}
+              </Text>
+
+              <Text
+                style={[
+                  styles.aboutVersion,
+                  { color: secondaryColor, fontSize: getFontSize('small', textSize) },
+                ]}
+              >
+                {t.version} 1.0.0
+              </Text>
+
+              <Text
+                style={[
+                  styles.aboutDescription,
+                  { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+                ]}
+              >
+                {t.welcomeTagline}
+              </Text>
+
+              <BigButton
+                title={t.cancel}
+                onPress={() => setShowAboutModal(false)}
+                variant="secondary"
+                style={styles.cancelButton}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
     </SafeAreaView>

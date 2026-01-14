@@ -506,8 +506,8 @@ export default function RecordingDetailScreen() {
   };
 
   const tabs = [
-    { key: 'summary', label: t.summary },
     { key: 'notes', label: t.notes },
+    { key: 'summary', label: t.summary },
   ];
 
   const hasNotes = recording.notes && recording.notes.length > 0;

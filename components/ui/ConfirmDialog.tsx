@@ -6,7 +6,7 @@ import {
   StyleSheet,
   useColorScheme,
   TouchableOpacity,
-  TouchableWithoutFeedback,
+  Pressable,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
@@ -55,46 +55,44 @@ export function ConfirmDialog({
       animationType="fade"
       onRequestClose={onCancel}
     >
-      <TouchableWithoutFeedback onPress={onCancel}>
-        <View style={styles.overlay}>
-          <TouchableWithoutFeedback>
-            <View style={[styles.dialog, { backgroundColor }]}>
-              <Text
-                style={[
-                  styles.title,
-                  { color: textColor, fontSize: getFontSize('header', textSize) },
-                ]}
-              >
-                {title}
-              </Text>
+      <Pressable style={styles.overlay} onPress={onCancel}>
+        <Pressable>
+          <View style={[styles.dialog, { backgroundColor }]}>
+            <Text
+              style={[
+                styles.title,
+                { color: textColor, fontSize: getFontSize('header', textSize) },
+              ]}
+            >
+              {title}
+            </Text>
 
-              <Text
-                style={[
-                  styles.message,
-                  { color: secondaryColor, fontSize: getFontSize('body', textSize) },
-                ]}
-              >
-                {message}
-              </Text>
+            <Text
+              style={[
+                styles.message,
+                { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+              ]}
+            >
+              {message}
+            </Text>
 
-              <View style={styles.buttons}>
-                <BigButton
-                  title={cancelText}
-                  onPress={onCancel}
-                  variant="secondary"
-                  style={styles.button}
-                />
-                <BigButton
-                  title={confirmText}
-                  onPress={handleConfirm}
-                  variant={variant}
-                  style={styles.button}
-                />
-              </View>
+            <View style={styles.buttons}>
+              <BigButton
+                title={cancelText}
+                onPress={onCancel}
+                variant="secondary"
+                style={styles.button}
+              />
+              <BigButton
+                title={confirmText}
+                onPress={handleConfirm}
+                variant={variant}
+                style={styles.button}
+              />
             </View>
-          </TouchableWithoutFeedback>
-        </View>
-      </TouchableWithoutFeedback>
+          </View>
+        </Pressable>
+      </Pressable>
     </Modal>
   );
 }

@@ -5,7 +5,7 @@ import {
   Text,
   StyleSheet,
   useColorScheme,
-  TouchableWithoutFeedback,
+  Pressable,
   Platform,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -258,65 +258,63 @@ export function ShareModal({ visible, recording, onClose, onCopied }: ShareModal
         animationType="slide"
         onRequestClose={onClose}
       >
-        <TouchableWithoutFeedback onPress={onClose}>
-          <View style={styles.overlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.modal, { backgroundColor }]}>
-                <View style={styles.handle} />
+        <Pressable style={styles.overlay} onPress={onClose}>
+          <Pressable>
+            <View style={[styles.modal, { backgroundColor }]}>
+              <View style={styles.handle} />
 
-                <Text
-                  style={[
-                    styles.title,
-                    { color: textColor, fontSize: getFontSize('header', textSize) },
-                  ]}
-                >
-                  {t.shareWithFamily}
-                </Text>
+              <Text
+                style={[
+                  styles.title,
+                  { color: textColor, fontSize: getFontSize('header', textSize) },
+                ]}
+              >
+                {t.shareWithFamily}
+              </Text>
 
-                <View style={styles.options}>
-                  {recording.summary && recording.summary.length > 0 && (
-                    <BigButton
-                      title={t.shareSummary}
-                      onPress={handleShareSummary}
-                      variant="primary"
-                      style={styles.option}
-                    />
-                  )}
-
-                  {recording.notes && recording.notes.length > 0 && (
-                    <BigButton
-                      title={t.shareNotes}
-                      onPress={handleShareNotes}
-                      variant="secondary"
-                      style={styles.option}
-                    />
-                  )}
-
+              <View style={styles.options}>
+                {recording.summary && recording.summary.length > 0 && (
                   <BigButton
-                    title={
-                      isConverting
-                        ? t.convertingAudio
-                        : Platform.OS === 'web'
-                          ? t.downloadAudio
-                          : t.shareAudio
-                    }
-                    onPress={handleShareAudio}
+                    title={t.shareSummary}
+                    onPress={handleShareSummary}
+                    variant="primary"
+                    style={styles.option}
+                  />
+                )}
+
+                {recording.notes && recording.notes.length > 0 && (
+                  <BigButton
+                    title={t.shareNotes}
+                    onPress={handleShareNotes}
                     variant="secondary"
                     style={styles.option}
-                    disabled={isConverting}
                   />
-                </View>
+                )}
 
                 <BigButton
-                  title={t.cancel}
-                  onPress={onClose}
+                  title={
+                    isConverting
+                      ? t.convertingAudio
+                      : Platform.OS === 'web'
+                        ? t.downloadAudio
+                        : t.shareAudio
+                  }
+                  onPress={handleShareAudio}
                   variant="secondary"
-                  style={styles.cancelButton}
+                  style={styles.option}
+                  disabled={isConverting}
                 />
               </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+
+              <BigButton
+                title={t.cancel}
+                onPress={onClose}
+                variant="secondary"
+                style={styles.cancelButton}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* In-app alert dialog */}
@@ -326,29 +324,27 @@ export function ShareModal({ visible, recording, onClose, onCopied }: ShareModal
         animationType="fade"
         onRequestClose={dismissAlert}
       >
-        <TouchableWithoutFeedback onPress={dismissAlert}>
-          <View style={styles.alertOverlay}>
-            <TouchableWithoutFeedback>
-              <View style={[styles.alertDialog, { backgroundColor }]}>
-                <Text
-                  style={[
-                    styles.alertMessage,
-                    { color: textColor, fontSize: getFontSize('body', textSize) },
-                  ]}
-                >
-                  {alertMessage}
-                </Text>
+        <Pressable style={styles.alertOverlay} onPress={dismissAlert}>
+          <Pressable>
+            <View style={[styles.alertDialog, { backgroundColor }]}>
+              <Text
+                style={[
+                  styles.alertMessage,
+                  { color: textColor, fontSize: getFontSize('body', textSize) },
+                ]}
+              >
+                {alertMessage}
+              </Text>
 
-                <BigButton
-                  title="OK"
-                  onPress={dismissAlert}
-                  variant="primary"
-                  style={styles.alertButton}
-                />
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
+              <BigButton
+                title="OK"
+                onPress={dismissAlert}
+                variant="primary"
+                style={styles.alertButton}
+              />
+            </View>
+          </Pressable>
+        </Pressable>
       </Modal>
     </>
   );
