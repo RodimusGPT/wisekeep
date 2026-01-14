@@ -14,7 +14,7 @@ export interface Recording {
   duration: number; // in seconds
   audioUri: string; // local file path
   audioRemoteUrl?: string; // Supabase storage URL if uploaded
-  status: 'recording' | 'processing_notes' | 'processing_summary' | 'ready' | 'error';
+  status: 'recording' | 'recorded' | 'processing_notes' | 'notes_ready' | 'processing_summary' | 'ready' | 'error';
   notes?: NoteLine[];
   summary?: string[];
   language?: Language;

@@ -139,11 +139,9 @@ const styles = StyleSheet.create({
   },
   buttonWrapper: {
     // Shadow for depth
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    // @ts-ignore - boxShadow is supported on web
+    boxShadow: '0px 4px 8px rgba(0, 0, 0, 0.3)',
+    elevation: 8, // For Android
   },
   button: {
     width: BUTTON_SIZE,
@@ -154,8 +152,8 @@ const styles = StyleSheet.create({
   },
   buttonRecording: {
     // Recording state has slightly different shadow
-    shadowColor: Colors.recordingActive,
-    shadowOpacity: 0.5,
+    // @ts-ignore - boxShadow is supported on web
+    boxShadow: `0px 4px 8px ${Colors.recordingActive}80`,
   },
   label: {
     marginTop: 20,

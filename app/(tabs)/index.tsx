@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import {
   processRecording as processRecordingApi,
   fetchRecordingById,
   saveRecording as saveRecordingToDb,
+  checkComprehensiveUsage,
 } from '@/services/supabase';
 
 export default function HomeScreen() {
@@ -85,10 +86,10 @@ export default function HomeScreen() {
   const textColor = isDark ? Colors.textDark : Colors.text;
   const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
 
-  // Get recent recordings (last 3)
-  const recentRecordings = recordings.slice(0, 3);
+  // Memoize recent recordings (last 3)
+  const recentRecordings = useMemo(() => recordings.slice(0, 3), [recordings]);
 
-  const handleRecordPress = async () => {
+  const handleRecordPress = useCallback(async () => {
     console.log('handleRecordPress called, isRecording:', isRecording);
     try {
       if (isRecording) {
@@ -99,11 +100,37 @@ export default function HomeScreen() {
           setProcessingId(recording.id);
           setCurrentRecordingId(recording.id);
 
-          // Process with Supabase Edge Function (handles chunking automatically)
-          processRecording(recording.id, recording.audioUri, recording.duration);
+          // Save recording without processing (new on-demand model)
+          await saveRecordingOnly(recording.id, recording.audioUri, recording.duration);
         }
       } else {
-        // Start recording
+        // Start recording - check storage limit first
+        if (!user) {
+          Alert.alert(t.error, '請先登入');
+          return;
+        }
+
+        // Check storage limits
+        try {
+          const usage = await checkComprehensiveUsage(user.id);
+
+          if (!usage.can_record) {
+            // Show storage limit alert with upgrade option
+            Alert.alert(
+              t.storageFull,
+              t.storageFullMessage,
+              [
+                { text: t.cancel, style: 'cancel' },
+                { text: t.viewAll, onPress: () => router.push('/(tabs)/library') },
+              ]
+            );
+            return;
+          }
+        } catch (error) {
+          console.error('Error checking storage limits:', error);
+          // Allow recording on error (fail open)
+        }
+
         if (!hasPermission) {
           const granted = await requestPermission();
           if (!granted) {
@@ -120,9 +147,83 @@ export default function HomeScreen() {
       console.error('Recording error:', error);
       Alert.alert(t.error, t.tryAgain);
     }
+  }, [isRecording, stopRecording, setCurrentRecordingId, user, hasPermission, requestPermission, startRecording, t, router, settings.language]);
+
+  // Save recording without AI processing (on-demand model)
+  const saveRecordingOnly = async (recordingId: string, audioUri: string, durationSeconds: number) => {
+    console.log('saveRecordingOnly started for:', recordingId);
+
+    if (!user) {
+      console.error('No user logged in');
+      updateRecording(recordingId, {
+        status: 'ready',
+        notes: [{ id: '1', timestamp: 0, text: '請先登入' }],
+        summary: ['尚未登入，請稍後重試。'],
+      });
+      setProcessingId(null);
+      return;
+    }
+
+    try {
+      // Step 1: Fetch the audio blob
+      console.log('Fetching audio blob from:', audioUri);
+      const response = await fetch(audioUri);
+      const audioBlob = await response.blob();
+      console.log('Audio blob size:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
+
+      // Step 2: Upload with automatic chunking
+      console.log('Uploading audio (with chunking if needed)...');
+      const { chunks, needsChunking } = await uploadAudioChunked(
+        user.authUserId,
+        recordingId,
+        audioBlob,
+        durationSeconds
+      );
+      console.log(`Upload complete: ${chunks.length} chunk(s), chunking ${needsChunking ? 'used' : 'not needed'}`);
+
+      // Step 3: Save recording to database with 'recorded' status (NOT processing)
+      console.log('Saving recording to database with recorded status...');
+      await saveRecordingToDb({
+        id: recordingId,
+        user_id: user.id,
+        device_id: user.deviceId || 'unknown',
+        duration: durationSeconds,
+        audio_url: chunks[0].url,
+        status: 'recorded', // New status: saved but not yet processed
+        language: settings.language,
+      });
+      console.log('Recording saved successfully');
+
+      // Update local state with remote URL so it's available for transcription
+      updateRecording(recordingId, {
+        status: 'recorded',
+        audioRemoteUrl: chunks[0].url,
+        notes: [],
+        summary: [],
+      });
+
+      setProcessingId(null);
+
+      // Navigate to recording detail screen so user can start processing
+      router.push(`/recording/${recordingId}`);
+
+    } catch (error) {
+      console.error('Save error:', error);
+      updateRecording(recordingId, {
+        status: 'ready',
+        notes: [{
+          id: '1',
+          timestamp: 0,
+          text: `儲存錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`,
+        }],
+        summary: ['儲存過程中發生錯誤，請重試。'],
+      });
+      setProcessingId(null);
+    }
   };
 
   // Process recording with Supabase Edge Function (handles chunking automatically)
+  // This will be called from recording detail screen when user clicks Transcribe button
   const processRecording = async (recordingId: string, audioUri: string, durationSeconds: number) => {
     console.log('processRecording started for:', recordingId);
 
@@ -257,13 +358,13 @@ export default function HomeScreen() {
     }
   };
 
-  const handleRecordingPress = (recording: Recording) => {
+  const handleRecordingPress = useCallback((recording: Recording) => {
     router.push(`/recording/${recording.id}`);
-  };
+  }, [router]);
 
-  const handleViewAll = () => {
+  const handleViewAll = useCallback(() => {
     router.push('/(tabs)/library');
-  };
+  }, [router]);
 
   // Recording active view
   if (isRecording) {
@@ -294,10 +395,15 @@ export default function HomeScreen() {
     );
   }
 
-  // Processing view
+  // Processing/Saving view
   if (processingId) {
     const processingRecording = recordings.find((r) => r.id === processingId);
-    const isTranscribing = processingRecording?.status === 'processing_notes';
+    const status = processingRecording?.status;
+
+    // Determine what operation is happening
+    const isSaving = !status || status === 'recording' || status === 'recorded';
+    const isTranscribing = status === 'processing_notes';
+    const isSummarizing = status === 'processing_summary';
 
     // Format elapsed time as MM:SS
     const formatElapsed = (seconds: number) => {
@@ -330,7 +436,7 @@ export default function HomeScreen() {
               { color: textColor, fontSize: getFontSize('header', textSize) },
             ]}
           >
-            {t.processing}
+            {isSaving ? t.saving : t.processing}
           </Text>
 
           <Text
@@ -339,7 +445,11 @@ export default function HomeScreen() {
               { color: Colors.primary, fontSize: getFontSize('body', textSize) },
             ]}
           >
-            {isTranscribing ? t.takingNotes : t.findingKeyPoints}
+            {isSaving
+              ? t.uploadingAudio
+              : isTranscribing
+                ? t.takingNotes
+                : t.findingKeyPoints}
           </Text>
 
           <Text
@@ -351,14 +461,16 @@ export default function HomeScreen() {
             {formatElapsed(elapsedTime)}
           </Text>
 
-          <Text
-            style={[
-              styles.processingHint,
-              { color: secondaryColor, fontSize: getFontSize('body', textSize) },
-            ]}
-          >
-            {t.mayTakeFewMinutes}
-          </Text>
+          {!isSaving && (
+            <Text
+              style={[
+                styles.processingHint,
+                { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+              ]}
+            >
+              {t.mayTakeFewMinutes}
+            </Text>
+          )}
         </View>
       </SafeAreaView>
     );

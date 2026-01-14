@@ -1,6 +1,13 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
-import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
+import {
+  useAudioRecorder,
+  RecordingOptions,
+  RecordingPresets,
+  getRecordingPermissionsAsync,
+  requestRecordingPermissionsAsync,
+  RecorderState
+} from 'expo-audio';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { generateUUID } from '@/utils/uuid';
@@ -27,7 +34,9 @@ export function useRecording(): UseRecordingReturn {
   const [metering, setMetering] = useState(0);
   const [hasPermission, setHasPermission] = useState(false);
 
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  // Recorder for native platforms (not used on web)
+  const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+
   const webRecorderRef = useRef<WebMediaRecorder | null>(null);
   const webStreamRef = useRef<WebMediaStream | null>(null);
   const webChunksRef = useRef<Blob[]>([]);
@@ -48,7 +57,7 @@ export function useRecording(): UseRecordingReturn {
       setMicrophonePermission(true);
       return true;
     }
-    const { status } = await Audio.getPermissionsAsync();
+    const { status } = await getRecordingPermissionsAsync();
     const granted = status === 'granted';
     setHasPermission(granted);
     setMicrophonePermission(granted);
@@ -65,7 +74,7 @@ export function useRecording(): UseRecordingReturn {
         setMicrophonePermission(true);
         return true;
       }
-      const { status } = await Audio.requestPermissionsAsync();
+      const { status } = await requestRecordingPermissionsAsync();
       const granted = status === 'granted';
       setHasPermission(granted);
       setMicrophonePermission(granted);
@@ -117,61 +126,12 @@ export function useRecording(): UseRecordingReturn {
         return;
       }
 
-      // Native recording using expo-av
-      // Configure audio mode for recording
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-        interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-        shouldDuckAndroid: false,
-        playThroughEarpieceAndroid: false,
-        staysActiveInBackground: true,
-      });
+      // Native recording using expo-audio
+      // Prepare and start recording
+      await recorder.prepareToRecordAsync();
+      recorder.record();
 
-      // Create recording
-      const recording = new Audio.Recording();
-
-      await recording.prepareToRecordAsync({
-        android: {
-          extension: '.m4a',
-          outputFormat: Audio.AndroidOutputFormat.MPEG_4,
-          audioEncoder: Audio.AndroidAudioEncoder.AAC,
-          sampleRate: 44100,
-          numberOfChannels: 1,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: '.m4a',
-          outputFormat: Audio.IOSOutputFormat.MPEG4AAC,
-          audioQuality: Audio.IOSAudioQuality.HIGH,
-          sampleRate: 44100,
-          numberOfChannels: 1,
-          bitRate: 128000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-        web: {
-          mimeType: 'audio/webm',
-          bitsPerSecond: 128000,
-        },
-        isMeteringEnabled: true,
-      });
-
-      // Set up metering callback
-      recording.setOnRecordingStatusUpdate((status) => {
-        if (status.isRecording && status.metering !== undefined) {
-          // Convert dB to 0-1 scale (typical range is -160 to 0 dB)
-          const normalizedMetering = Math.max(0, (status.metering + 60) / 60);
-          setMetering(Math.min(1, normalizedMetering));
-        }
-      });
-
-      await recording.startAsync();
-      recordingRef.current = recording;
-
-      // Start duration timer
+      // Start duration timer (status callback handles updates but we also track start time)
       startTimeRef.current = Date.now();
       setDuration(0);
       durationIntervalRef.current = setInterval(() => {
@@ -254,26 +214,13 @@ export function useRecording(): UseRecordingReturn {
         });
       }
 
-      // Native recording stop
-      if (!recordingRef.current) {
+      // Native recording stop using expo-audio
+      if (!recorder) {
         return null;
       }
 
-      const recording = recordingRef.current;
-      await recording.stopAndUnloadAsync();
-
-      // Reset audio mode
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        interruptionModeIOS: InterruptionModeIOS.MixWithOthers,
-        interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-        staysActiveInBackground: false,
-      });
-
-      const uri = recording.getURI();
+      await recorder.stop();
+      const uri = recorder.uri;
       if (!uri) {
         throw new Error('No recording URI');
       }
@@ -306,7 +253,6 @@ export function useRecording(): UseRecordingReturn {
       addRecording(newRecording);
 
       // Reset state
-      recordingRef.current = null;
       setIsRecording(false);
       setDuration(0);
       setMetering(0);
@@ -339,8 +285,8 @@ export function useRecording(): UseRecordingReturn {
         webStreamRef.current.getTracks().forEach(track => track.stop());
       }
       // Native cleanup
-      if (recordingRef.current) {
-        recordingRef.current.stopAndUnloadAsync().catch(console.error);
+      if (recorder && isRecording) {
+        recorder.stop().catch(console.error);
       }
     };
   }, []);

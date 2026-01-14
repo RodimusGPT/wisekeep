@@ -62,7 +62,11 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
     : 'rgba(211, 47, 47, 0.1)';
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+      showsVerticalScrollIndicator
+    >
       {notes.map((line, index) => {
         const isCurrent = isCurrentLine(line, index);
 
@@ -145,16 +149,21 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    minHeight: 100,
+  },
+  contentContainer: {
+    paddingVertical: 8,
+    flexGrow: 1,
   },
   line: {
     flexDirection: 'row',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    marginBottom: 2,
   },
   timestamp: {
-    width: 60,
+    width: 50,
     fontVariant: ['tabular-nums'],
   },
   content: {
@@ -165,12 +174,12 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   text: {
-    lineHeight: 28,
+    lineHeight: 22,
   },
   hint: {
     textAlign: 'center',
-    marginTop: 24,
-    marginBottom: 40,
+    marginTop: 16,
+    marginBottom: 24,
     fontStyle: 'italic',
   },
 });

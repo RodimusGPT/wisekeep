@@ -116,6 +116,20 @@ export interface UsageInfo {
   is_unlimited: boolean;
 }
 
+// New interface for comprehensive usage including storage limits
+export interface ComprehensiveUsage {
+  tier: 'free' | 'vip' | 'premium';
+  can_record: boolean;
+  can_process: boolean;
+  ai_minutes_used: number;
+  ai_minutes_limit: number;
+  ai_minutes_remaining: number;
+  storage_used: number;
+  storage_limit: number;
+  storage_remaining: number;
+  period_start: string;
+}
+
 export interface UserProfile {
   id: string;
   tier: 'free' | 'vip' | 'premium';
@@ -226,6 +240,23 @@ export async function checkUsage(userId: string): Promise<UsageInfo> {
   }
 
   return data as UsageInfo;
+}
+
+/**
+ * Check comprehensive usage including storage and AI processing limits
+ * Uses the new check_usage database function with storage limits
+ */
+export async function checkComprehensiveUsage(userId: string): Promise<ComprehensiveUsage> {
+  const { data, error } = await supabase.rpc('check_usage', {
+    p_user_id: userId,
+  });
+
+  if (error) {
+    console.error('Error checking comprehensive usage:', error);
+    throw error;
+  }
+
+  return data as ComprehensiveUsage;
 }
 
 // ============================================
@@ -452,28 +483,61 @@ export async function processRecording(
 ): Promise<{
   success: boolean;
   error?: string;
+  step?: string;
   usage?: { minutes_used: number; minutes_limit: number };
 }> {
-  const { data, error } = await supabase.functions.invoke('process-recording', {
-    body: {
-      recording_id: recordingId,
-      user_id: userId,
-      audio_chunks: audioChunks,
-      language,
-      duration_seconds: durationSeconds,
-    },
+  console.log('[API] processRecording called:', {
+    recordingId,
+    userId,
+    audioChunksCount: audioChunks.length,
+    language,
+    durationSeconds
   });
 
-  if (error) {
-    console.error('Error processing recording:', error);
-    return { success: false, error: error.message };
-  }
+  try {
+    const { data, error } = await supabase.functions.invoke('process-recording', {
+      body: {
+        recording_id: recordingId,
+        user_id: userId,
+        audio_chunks: audioChunks,
+        language,
+        duration_seconds: durationSeconds,
+      },
+    });
 
-  if (data.error) {
-    return { success: false, error: data.error, usage: data.usage };
-  }
+    if (error) {
+      console.error('Error processing recording:', error);
 
-  return { success: true, usage: data.usage };
+      // Try to extract error context from FunctionsHttpError
+      // The error.context property contains the Response object
+      let errorDetails: { message?: string; step?: string; error?: string } | null = null;
+      try {
+        // FunctionsHttpError has a context property with the response
+        const context = (error as any).context;
+        if (context && typeof context.json === 'function') {
+          errorDetails = await context.json();
+          console.error('Error response body:', errorDetails);
+        }
+      } catch (parseErr) {
+        console.error('Could not parse error response:', parseErr);
+      }
+
+      const errorMsg = errorDetails?.message || errorDetails?.error || error.message || 'Processing failed';
+      const errorStep = errorDetails?.step;
+      console.error('Error details:', { errorMsg, errorStep, data });
+      return { success: false, error: errorMsg, step: errorStep };
+    }
+
+    if (data?.error) {
+      console.error('Processing returned error:', data.error, data.message);
+      return { success: false, error: data.message || data.error, step: data.step, usage: data.usage };
+    }
+
+    return { success: true, usage: data?.usage };
+  } catch (err) {
+    console.error('Exception in processRecording:', err);
+    return { success: false, error: err instanceof Error ? err.message : 'Unknown error' };
+  }
 }
 
 // ============================================
@@ -563,10 +627,14 @@ export async function fetchRecordingById(recordingId: string): Promise<{
   status: string;
   notes: unknown[] | null;
   summary: unknown[] | null;
+  audio_url: string | null;
+  label: string | null;
+  created_at: string;
+  duration: number;
 } | null> {
   const { data, error } = await supabase
     .from('recordings')
-    .select('id, status, notes, summary')
+    .select('id, status, notes, summary, audio_url, label, created_at, duration')
     .eq('id', recordingId)
     .single();
 

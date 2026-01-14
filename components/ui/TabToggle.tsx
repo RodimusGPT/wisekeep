@@ -34,9 +34,10 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
     }
   };
 
-  const backgroundColor = isDark ? Colors.backgroundSecondaryDark : Colors.backgroundSecondary;
-  const activeBackgroundColor = Colors.playback; // Blue for playback page controls
-  const inactiveTextColor = isDark ? Colors.textDark : Colors.text;
+  const backgroundColor = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)';
+  const activeBackgroundColor = isDark ? Colors.cardDark : '#FFFFFF';
+  const activeTextColor = isDark ? Colors.textDark : Colors.text;
+  const inactiveTextColor = isDark ? 'rgba(255, 255, 255, 0.5)' : 'rgba(0, 0, 0, 0.4)';
 
   return (
     <View style={[styles.container, { backgroundColor }]}>
@@ -60,8 +61,8 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
               style={[
                 styles.tabText,
                 {
-                  color: isActive ? '#FFFFFF' : inactiveTextColor,
-                  fontSize: getFontSize('button', textSize),
+                  color: isActive ? activeTextColor : inactiveTextColor,
+                  fontSize: getFontSize('small', textSize),
                 },
                 isActive && styles.activeTabText,
               ]}
@@ -78,24 +79,24 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
 const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
-    borderRadius: 12,
-    padding: 4,
-    gap: 4,
+    borderRadius: 6,
+    padding: 2,
+    gap: 2,
   },
   tab: {
     flex: 1,
-    minHeight: 48,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
+    minHeight: 28,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   tabText: {
-    fontWeight: '500',
+    fontWeight: '400',
     textAlign: 'center',
   },
   activeTabText: {
-    fontWeight: '700',
+    fontWeight: '600',
   },
 });

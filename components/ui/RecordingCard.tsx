@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useCallback } from 'react';
 import {
   TouchableOpacity,
   View,
@@ -19,20 +19,20 @@ interface RecordingCardProps {
   onPress: () => void;
 }
 
-export function RecordingCard({ recording, onPress }: RecordingCardProps) {
+export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardProps) => {
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const textSize = useAppStore((state) => state.settings.textSize);
   const { t } = useI18n();
 
-  const handlePress = () => {
+  const handlePress = useCallback(() => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     onPress();
-  };
+  }, [onPress]);
 
-  // Format date in a senior-friendly way
-  const formatDate = (dateString: string): string => {
-    const date = new Date(dateString);
+  // Memoize formatted date
+  const formattedDate = useMemo(() => {
+    const date = new Date(recording.createdAt);
 
     if (isToday(date)) {
       return t.today;
@@ -47,10 +47,11 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
     }
 
     return format(date, 'yyyy/MM/dd');
-  };
+  }, [recording.createdAt, t.today, t.yesterday, t.daysAgo]);
 
-  // Format duration
-  const formatDuration = (seconds: number): string => {
+  // Memoize formatted duration
+  const formattedDuration = useMemo(() => {
+    const seconds = recording.duration;
     const hours = Math.floor(seconds / 3600);
     const minutes = Math.floor((seconds % 3600) / 60);
 
@@ -61,10 +62,10 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
       return `${minutes} ${t.minutes}`;
     }
     return `${seconds} ${t.seconds}`;
-  };
+  }, [recording.duration, t.hours, t.minutes, t.seconds]);
 
-  // Get first line of notes for preview
-  const getPreview = (): string => {
+  // Memoize preview text
+  const preview = useMemo(() => {
     if (recording.notes && recording.notes.length > 0) {
       const firstNote = recording.notes[0].text;
       return firstNote.length > 50
@@ -72,10 +73,10 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
         : firstNote;
     }
     return '';
-  };
+  }, [recording.notes]);
 
-  // Get status icon and color
-  const getStatusInfo = () => {
+  // Memoize status info
+  const statusInfo = useMemo(() => {
     switch (recording.status) {
       case 'recording':
         return { icon: 'mic', color: Colors.recordingActive, text: '' };
@@ -89,9 +90,7 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
       default:
         return { icon: 'document', color: Colors.textTertiary, text: '' };
     }
-  };
-
-  const statusInfo = getStatusInfo();
+  }, [recording.status, t.processingStatus, t.error]);
   const backgroundColor = isDark ? Colors.cardDark : Colors.card;
   const textColor = isDark ? Colors.textDark : Colors.text;
   const secondaryColor = isDark ? Colors.textSecondaryDark : Colors.textSecondary;
@@ -109,7 +108,7 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
       onPress={handlePress}
       activeOpacity={0.7}
       accessibilityRole="button"
-      accessibilityLabel={`${recording.label || 'Recording'} from ${formatDate(recording.createdAt)}, ${formatDuration(recording.duration)}`}
+      accessibilityLabel={`${recording.label || 'Recording'} from ${formattedDate}, ${formattedDuration}`}
     >
       {/* Label if exists */}
       {recording.label && (
@@ -131,7 +130,7 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
             { color: secondaryColor, fontSize: getFontSize('body', textSize) },
           ]}
         >
-          {formatDate(recording.createdAt)}
+          {formattedDate}
         </Text>
         <View style={styles.statusContainer}>
           <Ionicons
@@ -158,10 +157,10 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
           { color: secondaryColor, fontSize: getFontSize('body', textSize) },
         ]}
       >
-        {formatDuration(recording.duration)}
+        {formattedDuration}
       </Text>
 
-      {getPreview() ? (
+      {preview ? (
         <Text
           style={[
             styles.preview,
@@ -169,7 +168,7 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
           ]}
           numberOfLines={2}
         >
-          {getPreview()}
+          {preview}
         </Text>
       ) : null}
 
@@ -204,7 +203,9 @@ export function RecordingCard({ recording, onPress }: RecordingCardProps) {
       </View>
     </TouchableOpacity>
   );
-}
+});
+
+RecordingCard.displayName = 'RecordingCard';
 
 const styles = StyleSheet.create({
   card: {

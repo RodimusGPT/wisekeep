@@ -131,16 +131,26 @@ export default function SettingsScreen() {
     }
   };
 
-  // Get usage display text
-  const getUsageDisplay = (): string => {
+  // Get AI processing usage display
+  const getAIUsageDisplay = (): string => {
     if (!usage) return '';
     if (usage.isUnlimited) {
       return language === 'zh-TW' ? '無限制' : 'Unlimited';
     }
-    const remaining = getRemainingMinutes();
     return language === 'zh-TW'
-      ? `剩餘 ${remaining.toFixed(1)} 分鐘`
-      : `${remaining.toFixed(1)} min remaining`;
+      ? `剩餘 ${usage.aiMinutesRemaining.toFixed(1)} 分鐘`
+      : `${usage.aiMinutesRemaining.toFixed(1)} min remaining`;
+  };
+
+  // Get storage usage display
+  const getStorageUsageDisplay = (): string => {
+    if (!usage) return '';
+    if (usage.storageLimit === -1) {
+      return language === 'zh-TW' ? '無限制' : 'Unlimited';
+    }
+    return language === 'zh-TW'
+      ? `剩餘 ${usage.storageRemaining} 個錄音`
+      : `${usage.storageRemaining} recordings left`;
   };
 
   return (
@@ -168,25 +178,65 @@ export default function SettingsScreen() {
             ]}>
               <Text style={styles.tierBadgeText}>{getTierDisplay()}</Text>
             </View>
-            <Text style={[styles.usageText, { color: secondaryColor, fontSize: getFontSize('body', textSize) }]}>
-              {getUsageDisplay()}
-            </Text>
           </View>
 
-          {/* Show usage bar for free tier */}
-          {usage && !usage.isUnlimited && (
-            <View style={styles.usageBarContainer}>
-              <View style={styles.usageBarBackground}>
-                <View
-                  style={[
-                    styles.usageBarFill,
-                    { width: `${Math.min(100, (usage.minutesUsed / usage.minutesLimit) * 100)}%` },
-                  ]}
-                />
+          {/* AI Processing Usage */}
+          {usage && (
+            <View style={styles.usageSectionContainer}>
+              <View style={styles.usageLabelRow}>
+                <Ionicons name="flash" size={16} color={Colors.primary} />
+                <Text style={[styles.usageLabel, { color: textColor, fontSize: getFontSize('body', textSize) }]}>
+                  {language === 'zh-TW' ? 'AI 處理' : 'AI Processing'}
+                </Text>
+                <Text style={[styles.usageValue, { color: secondaryColor, fontSize: getFontSize('body', textSize) }]}>
+                  {getAIUsageDisplay()}
+                </Text>
               </View>
-              <Text style={[styles.usageDetails, { color: secondaryColor, fontSize: getFontSize('small', textSize) }]}>
-                {usage.minutesUsed.toFixed(1)} / {usage.minutesLimit} {language === 'zh-TW' ? '分鐘' : 'min'}
-              </Text>
+              {!usage.isUnlimited && (
+                <View style={styles.usageBarContainer}>
+                  <View style={styles.usageBarBackground}>
+                    <View
+                      style={[
+                        styles.usageBarFill,
+                        { width: `${Math.min(100, (usage.aiMinutesUsed / usage.aiMinutesLimit) * 100)}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.usageDetails, { color: secondaryColor, fontSize: getFontSize('small', textSize) }]}>
+                    {usage.aiMinutesUsed.toFixed(1)} / {usage.aiMinutesLimit} {language === 'zh-TW' ? '分鐘' : 'min'}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Storage Usage */}
+          {usage && (
+            <View style={styles.usageSectionContainer}>
+              <View style={styles.usageLabelRow}>
+                <Ionicons name="folder" size={16} color={Colors.primary} />
+                <Text style={[styles.usageLabel, { color: textColor, fontSize: getFontSize('body', textSize) }]}>
+                  {language === 'zh-TW' ? '儲存空間' : 'Storage'}
+                </Text>
+                <Text style={[styles.usageValue, { color: secondaryColor, fontSize: getFontSize('body', textSize) }]}>
+                  {getStorageUsageDisplay()}
+                </Text>
+              </View>
+              {usage.storageLimit !== -1 && (
+                <View style={styles.usageBarContainer}>
+                  <View style={styles.usageBarBackground}>
+                    <View
+                      style={[
+                        styles.usageBarFill,
+                        { width: `${Math.min(100, (usage.storageUsed / usage.storageLimit) * 100)}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text style={[styles.usageDetails, { color: secondaryColor, fontSize: getFontSize('small', textSize) }]}>
+                    {usage.storageUsed} / {usage.storageLimit} {language === 'zh-TW' ? '個錄音' : 'recordings'}
+                  </Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -615,6 +665,22 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+  },
+  usageSectionContainer: {
+    marginBottom: 20,
+  },
+  usageLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  usageLabel: {
+    fontWeight: '600',
+    flex: 1,
+  },
+  usageValue: {
+    fontWeight: '500',
   },
   tierBadge: {
     backgroundColor: Colors.border,

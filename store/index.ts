@@ -28,6 +28,16 @@ export interface UsageInfo {
   minutesRemaining: number;
   periodType: string;
   isUnlimited: boolean;
+  // New comprehensive usage fields
+  canRecord: boolean;
+  canProcess: boolean;
+  aiMinutesUsed: number;
+  aiMinutesLimit: number;
+  aiMinutesRemaining: number;
+  storageUsed: number;
+  storageLimit: number;
+  storageRemaining: number;
+  periodStart?: string;
 }
 
 // App configuration from server

@@ -52,10 +52,8 @@ const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    // @ts-ignore - boxShadow is supported on web
+    boxShadow: '0px 2px 4px rgba(0, 0, 0, 0.2)',
+    elevation: 4, // For Android
   },
 });

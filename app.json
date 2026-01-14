@@ -17,7 +17,9 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSMicrophoneUsageDescription": "WiseKeep needs microphone access to record audio for you. 智守需要使用麥克風來為您錄音。",
-        "UIBackgroundModes": ["audio"]
+        "UIBackgroundModes": [
+          "audio"
+        ]
       }
     },
     "android": {
@@ -45,7 +47,8 @@
         {
           "microphonePermission": "WiseKeep needs microphone access to record audio for you. 智守需要使用麥克風來為您錄音。"
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": true

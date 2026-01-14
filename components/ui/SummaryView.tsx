@@ -28,7 +28,11 @@ export function SummaryView({ summary, tapNotesHint = true }: SummaryViewProps) 
   const bulletColor = Colors.primary;
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={styles.contentContainer}
+      showsVerticalScrollIndicator
+    >
       {summary.map((point, index) => (
         <View key={index} style={styles.point}>
           <View style={styles.bulletContainer}>
@@ -44,7 +48,7 @@ export function SummaryView({ summary, tapNotesHint = true }: SummaryViewProps) 
               styles.text,
               {
                 color: textColor,
-                fontSize: getFontSize('bodyLarge', textSize),
+                fontSize: getFontSize('body', textSize),
               },
             ]}
           >
@@ -71,29 +75,34 @@ export function SummaryView({ summary, tapNotesHint = true }: SummaryViewProps) 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    minHeight: 100,
+  },
+  contentContainer: {
     paddingHorizontal: 8,
+    paddingVertical: 8,
+    flexGrow: 1,
   },
   point: {
     flexDirection: 'row',
-    marginBottom: 20,
+    marginBottom: 16,
     paddingRight: 8,
   },
   bulletContainer: {
-    width: 24,
-    paddingTop: 10,
+    width: 20,
+    paddingTop: 4,
   },
   bullet: {
-    marginTop: 2,
+    marginTop: 0,
   },
   text: {
     flex: 1,
-    lineHeight: 32,
-    fontWeight: '500',
+    lineHeight: 24,
+    fontWeight: '400',
   },
   hint: {
     textAlign: 'center',
-    marginTop: 24,
-    marginBottom: 40,
+    marginTop: 16,
+    marginBottom: 24,
     fontStyle: 'italic',
   },
 });

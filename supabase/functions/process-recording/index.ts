@@ -30,6 +30,20 @@ interface UsageCheck {
   period_type: string;
 }
 
+// New comprehensive usage interface
+interface ComprehensiveUsage {
+  tier: string;
+  can_record: boolean;
+  can_process: boolean;
+  ai_minutes_used: number;
+  ai_minutes_limit: number;
+  ai_minutes_remaining: number;
+  storage_used: number;
+  storage_limit: number;
+  storage_remaining: number;
+  period_start: string;
+}
+
 interface TranscriptionSegment {
   start: number;
   end: number;
@@ -105,7 +119,7 @@ function getSupabaseClient() {
   );
 }
 
-// Check if user has remaining usage quota
+// Check if user has remaining usage quota (DEPRECATED - use checkComprehensiveUsage)
 async function checkUsageLimit(supabase: ReturnType<typeof createClient>, userId: string): Promise<UsageCheck> {
   const { data, error } = await supabase.rpc("check_usage_limit", { p_user_id: userId });
 
@@ -117,7 +131,19 @@ async function checkUsageLimit(supabase: ReturnType<typeof createClient>, userId
   return data[0];
 }
 
-// Update user's usage after recording
+// Check comprehensive usage including AI processing and storage limits
+async function checkComprehensiveUsage(supabase: ReturnType<typeof createClient>, userId: string): Promise<ComprehensiveUsage> {
+  const { data, error } = await supabase.rpc("check_usage", { p_user_id: userId });
+
+  if (error) {
+    console.error("Error checking comprehensive usage:", error);
+    throw new Error("Failed to check usage");
+  }
+
+  return data as ComprehensiveUsage;
+}
+
+// Update user's usage after recording (DEPRECATED - use updateAIUsage)
 async function updateUsage(supabase: ReturnType<typeof createClient>, userId: string, minutes: number): Promise<void> {
   const { error } = await supabase.rpc("update_usage", {
     p_user_id: userId,
@@ -127,6 +153,19 @@ async function updateUsage(supabase: ReturnType<typeof createClient>, userId: st
   if (error) {
     console.error("Error updating usage:", error);
     throw new Error("Failed to update usage");
+  }
+}
+
+// Update AI processing usage (minutes_transcribed) after transcription
+async function updateAIUsage(supabase: ReturnType<typeof createClient>, userId: string, minutes: number): Promise<void> {
+  const { error } = await supabase.rpc("increment_ai_usage", {
+    p_user_id: userId,
+    p_minutes: minutes,
+  });
+
+  if (error) {
+    console.error("Error updating AI usage:", error);
+    throw new Error("Failed to update AI usage");
   }
 }
 
@@ -156,13 +195,16 @@ async function transcribeChunk(audioUrl: string, language: string): Promise<Tran
   }
 
   // Fetch audio file
+  console.log(`Fetching audio from: ${audioUrl.substring(0, 80)}...`);
   const audioResponse = await fetch(audioUrl);
   if (!audioResponse.ok) {
-    throw new Error(`Failed to fetch audio: ${audioResponse.status}`);
+    const errorBody = await audioResponse.text().catch(() => "");
+    console.error(`Audio fetch failed: status=${audioResponse.status}, body=${errorBody.substring(0, 200)}`);
+    throw new Error(`Failed to fetch audio: ${audioResponse.status} - ${errorBody.substring(0, 100)}`);
   }
 
   const audioBlob = await audioResponse.blob();
-  console.log(`Transcribing audio chunk: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB`);
+  console.log(`Audio fetched successfully: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB`);
 
   // Prepare form data for Groq
   const formData = new FormData();
@@ -333,14 +375,21 @@ Deno.serve(async (req) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  let recordingId = "unknown";
+  let currentStep = "init";
+
   try {
+    currentStep = "create_client";
     const supabase = getSupabaseClient();
 
     // Parse request
+    currentStep = "parse_request";
     const body: ProcessRequest = await req.json();
     const { recording_id, user_id, audio_chunks, language, duration_seconds } = body;
+    recordingId = recording_id || "unknown";
 
     // Validate required fields
+    currentStep = "validate_fields";
     if (!recording_id || !user_id || !audio_chunks || audio_chunks.length === 0) {
       return new Response(
         JSON.stringify({ error: "Missing required fields" }),
@@ -351,26 +400,30 @@ Deno.serve(async (req) => {
     const durationMinutes = duration_seconds / 60;
     const chunkCount = audio_chunks.length;
 
-    console.log(`Processing recording ${recording_id}: ${chunkCount} chunk(s), ${durationMinutes.toFixed(1)} minutes`);
+    console.log(`[${recording_id}] Processing: ${chunkCount} chunk(s), ${durationMinutes.toFixed(1)} minutes`);
+    console.log(`[${recording_id}] Audio URL: ${audio_chunks[0]?.url?.substring(0, 80)}...`);
 
-    // Check usage limits
-    const usageCheck = await checkUsageLimit(supabase, user_id);
+    // Check comprehensive usage limits (AI processing + storage)
+    currentStep = "check_usage";
+    console.log(`[${recording_id}] Checking usage for user ${user_id}...`);
+    const usage = await checkComprehensiveUsage(supabase, user_id);
+    console.log(`[${recording_id}] Usage check passed: tier=${usage.tier}, can_process=${usage.can_process}`);
 
-    if (!usageCheck.allowed) {
-      // User has exceeded their limit
+    if (!usage.can_process) {
+      // User has exceeded their AI processing limit
       await updateRecordingStatus(supabase, recording_id, "error", {
-        error_message: "Usage limit exceeded",
+        error_message: "AI processing limit exceeded",
       });
 
       return new Response(
         JSON.stringify({
-          error: "usage_limit_exceeded",
-          message: "You have reached your recording limit for this period",
+          error: "ai_limit_exceeded",
+          message: "You have reached your AI processing limit for this period",
           usage: {
-            minutes_used: usageCheck.minutes_used,
-            minutes_limit: usageCheck.minutes_limit,
-            period_type: usageCheck.period_type,
-            tier: usageCheck.tier,
+            ai_minutes_used: usage.ai_minutes_used,
+            ai_minutes_limit: usage.ai_minutes_limit,
+            ai_minutes_remaining: usage.ai_minutes_remaining,
+            tier: usage.tier,
           },
         }),
         { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -378,34 +431,44 @@ Deno.serve(async (req) => {
     }
 
     // Update status to processing
+    currentStep = "update_status_processing";
+    console.log(`[${recording_id}] Updating status to processing_notes...`);
     await updateRecordingStatus(supabase, recording_id, "processing_notes");
 
     // Step 1: Transcribe all chunks and combine
-    console.log(`Transcribing ${chunkCount} chunk(s)...`);
+    currentStep = "transcribe";
+    console.log(`[${recording_id}] Starting transcription of ${chunkCount} chunk(s)...`);
     const { fullText, notes } = await transcribeAllChunks(audio_chunks, language);
 
-    console.log(`Transcription complete: ${fullText.length} characters, ${notes.length} segments`);
+    console.log(`[${recording_id}] Transcription complete: ${fullText.length} chars, ${notes.length} segments`);
 
     // Update with notes
+    currentStep = "update_status_notes";
     await updateRecordingStatus(supabase, recording_id, "processing_summary", { notes });
 
     // Step 2: Summarize if there's enough text
+    currentStep = "summarize";
     let summary: string[] = [];
     if (fullText.length > 50) {
-      console.log(`Summarizing recording ${recording_id}...`);
+      console.log(`[${recording_id}] Summarizing...`);
       summary = await summarizeText(fullText, language);
-      console.log(`Summarization complete: ${summary.length} points`);
+      console.log(`[${recording_id}] Summarization complete: ${summary.length} points`);
     }
 
     // Update with final results
+    currentStep = "update_status_ready";
     await updateRecordingStatus(supabase, recording_id, "ready", { summary });
 
-    // Update usage (only for free tier users - VIP/premium don't count against limits)
-    if (usageCheck.tier === "free") {
-      await updateUsage(supabase, user_id, durationMinutes);
-    }
+    // Update AI usage (transcription counts against limit, summary is free)
+    currentStep = "update_ai_usage";
+    console.log(`[${recording_id}] Updating AI usage: ${durationMinutes.toFixed(2)} minutes`);
+    await updateAIUsage(supabase, user_id, durationMinutes);
 
-    console.log(`Recording ${recording_id} processed successfully`);
+    console.log(`[${recording_id}] Processing completed successfully`);
+
+    // Get updated usage after incrementing
+    currentStep = "get_final_usage";
+    const updatedUsage = await checkComprehensiveUsage(supabase, user_id);
 
     return new Response(
       JSON.stringify({
@@ -414,20 +477,31 @@ Deno.serve(async (req) => {
         chunk_count: chunkCount,
         notes_count: notes.length,
         summary_points: summary.length,
-        usage: usageCheck.tier === "free" ? {
-          minutes_used: usageCheck.minutes_used + durationMinutes,
-          minutes_limit: usageCheck.minutes_limit,
-        } : null,
+        usage: {
+          tier: updatedUsage.tier,
+          ai_minutes_used: updatedUsage.ai_minutes_used,
+          ai_minutes_limit: updatedUsage.ai_minutes_limit,
+          ai_minutes_remaining: updatedUsage.ai_minutes_remaining,
+          can_process: updatedUsage.can_process,
+        },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Error processing recording:", error);
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    const errorStack = error instanceof Error ? error.stack : undefined;
+
+    console.error(`[${recordingId}] ERROR at step "${currentStep}":`, errorMessage);
+    if (errorStack) {
+      console.error(`[${recordingId}] Stack trace:`, errorStack);
+    }
 
     return new Response(
       JSON.stringify({
         error: "processing_failed",
-        message: error instanceof Error ? error.message : "Unknown error",
+        message: errorMessage,
+        step: currentStep,
+        recording_id: recordingId,
       }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

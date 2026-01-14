@@ -30,6 +30,8 @@ export interface Translations {
 
   // Processing
   processing: string;
+  saving: string;
+  uploadingAudio: string;
   takingNotes: string;
   findingKeyPoints: string;
   mayTakeFewMinutes: string;
@@ -47,6 +49,15 @@ export interface Translations {
   share: string;
   delete: string;
   regenerate: string;
+  transcribe: string;
+  summarize: string;
+  recordingSaved: string;
+  transcribePromptTitle: string;
+  transcribePromptMessage: string;
+  summarizePromptTitle: string;
+  summarizePromptMessage: string;
+  aiMinutesRemaining: string;
+  unlimited: string;
 
   // Playback
   play: string;
@@ -170,6 +181,8 @@ export const translations: Record<Language, Translations> = {
 
     // Processing
     processing: '處理中',
+    saving: '儲存中',
+    uploadingAudio: '正在上傳...',
     takingNotes: '正在做筆記...',
     findingKeyPoints: '正在整理重點...',
     mayTakeFewMinutes: '這可能需要幾分鐘',
@@ -187,6 +200,15 @@ export const translations: Record<Language, Translations> = {
     share: '分享',
     delete: '刪除',
     regenerate: '重新整理',
+    transcribe: '轉成文字',
+    summarize: '整理重點',
+    recordingSaved: '錄音已儲存，點擊下方按鈕轉成文字',
+    transcribePromptTitle: '轉成文字',
+    transcribePromptMessage: '這將使用約 {minutes} 分鐘的 AI 處理額度。',
+    summarizePromptTitle: '整理重點',
+    summarizePromptMessage: '將根據文字筆記整理重點。此功能不消耗 AI 額度。',
+    aiMinutesRemaining: '剩餘額度：{remaining} 分鐘',
+    unlimited: '無限',
 
     // Playback
     play: '播放',
@@ -309,6 +331,8 @@ export const translations: Record<Language, Translations> = {
 
     // Processing
     processing: 'Processing',
+    saving: 'Saving',
+    uploadingAudio: 'Uploading audio...',
     takingNotes: 'Taking notes...',
     findingKeyPoints: 'Finding key points...',
     mayTakeFewMinutes: 'This may take a few minutes',
@@ -326,6 +350,15 @@ export const translations: Record<Language, Translations> = {
     share: 'Share',
     delete: 'Delete',
     regenerate: 'Regenerate',
+    transcribe: 'Transcribe',
+    summarize: 'Summarize',
+    recordingSaved: 'Recording saved. Tap below to transcribe',
+    transcribePromptTitle: 'Start Transcription',
+    transcribePromptMessage: 'This will use approximately {minutes} minutes of AI processing.',
+    summarizePromptTitle: 'Start Summarization',
+    summarizePromptMessage: 'Generate summary from transcript. Summarization is free.',
+    aiMinutesRemaining: 'Remaining: {remaining} minutes',
+    unlimited: 'Unlimited',
 
     // Playback
     play: 'Play',
