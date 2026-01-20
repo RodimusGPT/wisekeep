@@ -151,7 +151,17 @@ jobs:
           ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
           API_KEY_CONTENT: ${{ secrets.APP_STORE_CONNECT_API_KEY_CONTENT }}
         run: |
+          # Create directory for API key
+          mkdir -p ~/.appstoreconnect/private_keys
+
+          # Save API key to file (xcrun altool expects it at this location)
+          echo "$API_KEY_CONTENT" > ~/.appstoreconnect/private_keys/AuthKey_${API_KEY_ID}.p8
+
+          # Find the IPA
           IPA_PATH=$(find ios/build -name "*.ipa" | head -n 1)
+          echo "Uploading: $IPA_PATH"
+
+          # Upload to TestFlight
           xcrun altool --upload-app \
             --type ios \
             --file "$IPA_PATH" \
