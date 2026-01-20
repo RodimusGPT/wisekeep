@@ -93,13 +93,26 @@ jobs:
             DEVELOPMENT_TEAM="SW45JNC882" \
             archive
 
+      - name: Inspect Archive
+        run: |
+          cd ios
+          echo "=== Archive Info ==="
+          cat build/wisekeep.xcarchive/Info.plist
+          echo ""
+          echo "=== Embedded Provisioning Profile ==="
+          /usr/bin/security cms -D -i build/wisekeep.xcarchive/Products/Applications/*.app/embedded.mobileprovision 2>/dev/null | head -50 || echo "No embedded profile found"
+          echo ""
+          echo "=== Code Signature ==="
+          codesign -dv --verbose=4 build/wisekeep.xcarchive/Products/Applications/*.app 2>&1 || echo "No signature found"
+
       - name: Export IPA
         run: |
           cd ios
           xcodebuild -exportArchive \
             -archivePath $PWD/build/wisekeep.xcarchive \
             -exportOptionsPlist $PWD/../.github/workflows/ExportOptions.plist \
-            -exportPath $PWD/build
+            -exportPath $PWD/build \
+            -allowProvisioningUpdates
 
       - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
