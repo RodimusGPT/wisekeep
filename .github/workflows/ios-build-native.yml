@@ -91,11 +91,20 @@ jobs:
       - name: Build iOS App
         run: |
           cd ios
-          # Get workspace and scheme names dynamically
+          # Get workspace name
           WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null | grep -A 100 "Schemes:" | grep -v "Schemes:" | head -n 1 | xargs)
-          echo "Building workspace: $WORKSPACE with scheme: $SCHEME"
+          echo "Workspace: $WORKSPACE"
+
+          # List all schemes for debugging
+          echo "Available schemes:"
+          xcodebuild -workspace "$WORKSPACE" -list 2>/dev/null | grep -A 100 "Schemes:" | grep -v "Schemes:" | grep -v "^$"
+
+          # Get scheme name from workspace (remove .xcworkspace extension)
+          # The main app scheme should match the workspace name
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          echo "Using scheme: $SCHEME"
           echo "Using Provisioning Profile UUID: $PROVISIONING_PROFILE_UUID"
+
           xcodebuild -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
