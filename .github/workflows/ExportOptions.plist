@@ -17,7 +17,7 @@
 	<key>provisioningProfiles</key>
 	<dict>
 		<key>xyz.generalize.wisekeep</key>
-		<string>match AppStore xyz.generalize.wisekeep</string>
+		<string>WiseKeep App Store Distribution</string>
 	</dict>
 </dict>
 </plist>
