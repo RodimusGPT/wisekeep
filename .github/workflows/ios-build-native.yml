@@ -43,6 +43,14 @@ jobs:
           cd ios
           pod install
 
+      - name: Install Apple WWDR Certificate
+        run: |
+          # Download Apple Worldwide Developer Relations Intermediate Certificate
+          curl -sL https://www.apple.com/certificateauthority/AppleWWDRCAG3.cer -o AppleWWDRCAG3.cer
+          sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain AppleWWDRCAG3.cer || true
+          security import AppleWWDRCAG3.cer -k ~/Library/Keychains/login.keychain-db || true
+          rm AppleWWDRCAG3.cer
+
       - name: Import Code Signing Certificates
         uses: apple-actions/import-codesign-certs@v2
         with:
@@ -63,11 +71,17 @@ jobs:
 
       - name: List signing identities
         run: |
-          echo "Available signing identities:"
+          echo "=== Available signing identities ==="
           security find-identity -v -p codesigning
           echo ""
-          echo "Provisioning profiles:"
+          echo "=== Certificate details ==="
+          security find-certificate -a -c "Apple Distribution" -p | openssl x509 -noout -subject -issuer -dates 2>/dev/null || echo "No Apple Distribution cert found"
+          echo ""
+          echo "=== Provisioning profiles ==="
           ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+          echo ""
+          echo "=== Profile details ==="
+          /usr/bin/security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/distribution.mobileprovision 2>/dev/null | grep -A2 "Name\|TeamIdentifier\|application-identifier" | head -20
 
       - name: List available schemes
         run: |
@@ -88,7 +102,7 @@ jobs:
             -destination generic/platform=iOS \
             -archivePath $PWD/build/wisekeep.xcarchive \
             CODE_SIGN_STYLE=Manual \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
+            CODE_SIGN_IDENTITY="iPhone Distribution" \
             PROVISIONING_PROFILE_SPECIFIER="WiseKeep App Store Distribution" \
             DEVELOPMENT_TEAM="SW45JNC882" \
             archive
