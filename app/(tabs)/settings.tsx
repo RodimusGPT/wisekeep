@@ -236,8 +236,8 @@ export default function SettingsScreen() {
             </View>
           )}
 
-          {/* Upgrade button - only show on mobile for free tier users when purchases are initialized */}
-          {isPurchasesSupported && isPurchasesInitialized && !isPremium && user?.tier === 'free' && (
+          {/* Upgrade button - TEMPORARILY DISABLED until RevenueCat is fully configured */}
+          {false && isPurchasesSupported && isPurchasesInitialized && !isPremium && user?.tier === 'free' && (
             <TouchableOpacity
               style={styles.upgradeButton}
               onPress={handleUpgrade}
