@@ -29,6 +29,22 @@ jobs:
       - name: Setup Expo
         run: npm install -g expo-cli
 
+      - name: Inject Supabase credentials into app.json
+        env:
+          SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_ANON_KEY }}
+        run: |
+          # Inject Supabase credentials into app.json extra config
+          # This makes them available at runtime via Constants.expoConfig.extra
+          node -e "
+          const fs = require('fs');
+          const appJson = JSON.parse(fs.readFileSync('app.json', 'utf8'));
+          appJson.expo.extra.EXPO_PUBLIC_SUPABASE_URL = process.env.SUPABASE_URL;
+          appJson.expo.extra.EXPO_PUBLIC_SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
+          fs.writeFileSync('app.json', JSON.stringify(appJson, null, 2));
+          console.log('✓ Supabase credentials injected into app.json');
+          "
+
       - name: Prebuild iOS project
         run: npx expo prebuild --platform ios --clean
 
