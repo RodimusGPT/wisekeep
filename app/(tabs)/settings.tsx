@@ -256,8 +256,8 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           )}
 
-          {/* Restore purchases button - only show on mobile */}
-          {isPurchasesSupported && (
+          {/* Restore purchases button - only show on mobile when purchases initialized */}
+          {isPurchasesSupported && isPurchasesInitialized && (
             <TouchableOpacity
               style={styles.restoreButton}
               onPress={handleRestorePurchases}
