@@ -286,6 +286,14 @@ export function usePurchases(): UsePurchasesResult {
       return;
     }
 
+    if (!isInitialized) {
+      console.warn('[usePurchases] Cannot show paywall - RevenueCat not initialized');
+      if (error?.code === 'NO_API_KEY') {
+        console.warn('[usePurchases] RevenueCat API key not configured');
+      }
+      return;
+    }
+
     try {
       // Dynamic import to avoid bundling on web
       const RevenueCatUI = await import('react-native-purchases-ui');
@@ -299,7 +307,7 @@ export function usePurchases(): UsePurchasesResult {
       console.error('[usePurchases] Error showing paywall:', err);
       handleError(err);
     }
-  }, [refreshSubscriptionStatus, handleError]);
+  }, [isInitialized, error, refreshSubscriptionStatus, handleError]);
 
   return {
     // State

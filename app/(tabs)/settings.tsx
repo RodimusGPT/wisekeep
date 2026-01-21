@@ -29,6 +29,7 @@ export default function SettingsScreen() {
   const { user, usage, getRemainingMinutes } = useAuth();
   const {
     isPurchasesSupported,
+    isInitialized: isPurchasesInitialized,
     isProcessing: isPurchaseProcessing,
     showPaywall,
     restorePurchases,
@@ -235,8 +236,8 @@ export default function SettingsScreen() {
             </View>
           )}
 
-          {/* Upgrade button - only show on mobile for free tier users */}
-          {isPurchasesSupported && !isPremium && user?.tier === 'free' && (
+          {/* Upgrade button - only show on mobile for free tier users when purchases are initialized */}
+          {isPurchasesSupported && isPurchasesInitialized && !isPremium && user?.tier === 'free' && (
             <TouchableOpacity
               style={styles.upgradeButton}
               onPress={handleUpgrade}
