@@ -32,6 +32,20 @@ jobs:
       - name: Prebuild iOS project
         run: npx expo prebuild --platform ios --clean
 
+      - name: Set Build Number
+        run: |
+          cd ios
+          # Use GitHub run number as build number (auto-increments with each workflow run)
+          BUILD_NUMBER=${{ github.run_number }}
+          echo "Setting build number to: $BUILD_NUMBER"
+
+          # Update build number in all Info.plist files
+          find . -name "Info.plist" -exec /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" {} \;
+
+          # Verify the update
+          echo "Updated build number in Info.plist:"
+          /usr/libexec/PlistBuddy -c "Print CFBundleVersion" */Info.plist
+
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
