@@ -6,8 +6,10 @@ import {
   RecordingPresets,
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
-  RecorderState
+  RecorderState,
+  setIsAudioActiveAsync,
 } from 'expo-audio';
+import { setAudioModeAsync } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { generateUUID } from '@/utils/uuid';
@@ -127,9 +129,28 @@ export function useRecording(): UseRecordingReturn {
       }
 
       // Native recording using expo-audio
-      // Prepare and start recording
-      await recorder.prepareToRecordAsync();
-      recorder.record();
+      try {
+        // Configure audio session for recording (iOS requirement)
+        console.log('[useRecording] Configuring audio session...');
+        await setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+
+        // Activate audio session
+        await setIsAudioActiveAsync(true);
+        console.log('[useRecording] Audio session configured');
+
+        console.log('[useRecording] Preparing to record...');
+        await recorder.prepareToRecordAsync();
+        console.log('[useRecording] Starting recording...');
+        recorder.record();
+        console.log('[useRecording] Recording started successfully');
+      } catch (recordError) {
+        console.error('[useRecording] Failed to prepare/start recorder:', recordError);
+        // Provide more specific error message
+        throw new Error(`Recording setup failed: ${recordError instanceof Error ? recordError.message : 'Unknown error'}`);
+      }
 
       // Start duration timer (status callback handles updates but we also track start time)
       startTimeRef.current = Date.now();
@@ -142,10 +163,16 @@ export function useRecording(): UseRecordingReturn {
       setIsRecording(true);
 
       // Haptic feedback
-      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      try {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch (hapticError) {
+        console.warn('[useRecording] Haptic feedback failed:', hapticError);
+        // Non-critical, don't throw
+      }
 
     } catch (error) {
       console.error('Failed to start recording:', error);
+      setIsRecording(false);
       throw error;
     }
   }, [hasPermission]);
@@ -224,6 +251,16 @@ export function useRecording(): UseRecordingReturn {
       }
 
       await recorder.stop();
+
+      // Deactivate audio session after stopping
+      try {
+        await setIsAudioActiveAsync(false);
+        console.log('[useRecording] Audio session deactivated');
+      } catch (error) {
+        console.warn('[useRecording] Failed to deactivate audio session:', error);
+        // Non-critical, continue
+      }
+
       const uri = recorder.uri;
       if (!uri) {
         throw new Error('No recording URI');
