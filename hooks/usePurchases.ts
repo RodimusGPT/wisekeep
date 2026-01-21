@@ -145,9 +145,11 @@ export function usePurchases(): UsePurchasesResult {
     }
 
     const apiKey = getApiKey();
-    if (!apiKey) {
+    // Strict check - API key must be a non-empty string
+    if (!apiKey || typeof apiKey !== 'string' || apiKey.trim() === '') {
       console.warn('[usePurchases] No API key configured for', Platform.OS);
       setIsLoading(false);
+      setIsInitialized(false); // Explicitly set to false
       setError({ message: 'RevenueCat API key not configured', code: 'NO_API_KEY' });
       return;
     }
@@ -159,8 +161,8 @@ export function usePurchases(): UsePurchasesResult {
           Purchases.setLogLevel(LOG_LEVEL.VERBOSE);
         }
 
-        // Configure the SDK
-        Purchases.configure({ apiKey });
+        // Configure the SDK with validated API key
+        Purchases.configure({ apiKey: apiKey });
 
         // Get initial customer info and offerings
         const [info, offerings] = await Promise.all([
@@ -176,6 +178,7 @@ export function usePurchases(): UsePurchasesResult {
         console.log('[usePurchases] Initialized successfully');
       } catch (err) {
         console.error('[usePurchases] Initialization failed:', err);
+        setIsInitialized(false); // Ensure it's false on error
         handleError(err);
       } finally {
         setIsLoading(false);
