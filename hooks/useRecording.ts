@@ -2,14 +2,12 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { Platform } from 'react-native';
 import {
   useAudioRecorder,
-  RecordingOptions,
   RecordingPresets,
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
-  RecorderState,
   setIsAudioActiveAsync,
+  setAudioModeAsync,
 } from 'expo-audio';
-import { setAudioModeAsync } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import * as Haptics from 'expo-haptics';
 import { generateUUID } from '@/utils/uuid';
