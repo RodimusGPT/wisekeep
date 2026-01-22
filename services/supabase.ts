@@ -340,33 +340,15 @@ export async function uploadAudio(
   const { extension, contentType } = getAudioFormat(audioBlob);
   const fileName = `${userId}/${recordingId}.${extension}`;
 
-  console.log(`[uploadAudio] Original blob type: ${audioBlob.type}, normalizing to: ${contentType}`);
+  console.log(`[uploadAudio] Blob type: ${audioBlob.type}, uploading as: ${contentType}`);
 
-  // CRITICAL: Create a new Blob with the correct MIME type
-  // Supabase storage bucket has allowed_mime_types policy that rejects non-standard types like audio/x-m4a
-  // On React Native, new Blob([existingBlob], {type}) may not change the type properly
-  // So we extract the raw data first, then create a fresh blob with the correct type
-  // Note: Blob.arrayBuffer() may not exist on React Native, use FileReader fallback
-  let arrayBuffer: ArrayBuffer;
-  if (typeof audioBlob.arrayBuffer === 'function') {
-    arrayBuffer = await audioBlob.arrayBuffer();
-  } else {
-    // Fallback for React Native where arrayBuffer() may not exist
-    arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as ArrayBuffer);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsArrayBuffer(audioBlob);
-    });
-  }
-  const normalizedBlob = new Blob([arrayBuffer], { type: contentType });
-  console.log(`[uploadAudio] Normalized blob type: ${normalizedBlob.type}`);
-
-  console.log(`[uploadAudio] Uploading as ${extension} with content type ${contentType}`);
+  // Note: On React Native, we cannot normalize the blob type (ArrayBuffer/Blob creation is limited)
+  // The Supabase bucket must have audio/x-m4a in allowed_mime_types for iOS uploads to work
+  // We pass contentType in options which sets the Content-Type header
 
   const { data, error } = await supabase.storage
     .from('recordings')
-    .upload(fileName, normalizedBlob, {
+    .upload(fileName, audioBlob, {
       contentType,
       upsert: true,
     });
@@ -453,26 +435,12 @@ async function uploadChunk(
   const { extension, contentType } = getAudioFormat(chunk.blob);
   const fileName = `${userId}/${recordingId}_chunk${chunk.index}.${extension}`;
 
-  // Create a new Blob with normalized MIME type (same as uploadAudio)
-  // Extract raw data first to ensure type is properly applied on React Native
-  // Note: Blob.arrayBuffer() may not exist on React Native, use FileReader fallback
-  let arrayBuffer: ArrayBuffer;
-  if (typeof chunk.blob.arrayBuffer === 'function') {
-    arrayBuffer = await chunk.blob.arrayBuffer();
-  } else {
-    arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as ArrayBuffer);
-      reader.onerror = () => reject(reader.error);
-      reader.readAsArrayBuffer(chunk.blob);
-    });
-  }
-  const normalizedBlob = new Blob([arrayBuffer], { type: contentType });
-  console.log(`[uploadChunk] Chunk ${chunk.index} normalized: ${chunk.blob.type} -> ${normalizedBlob.type}`);
+  // Note: On React Native, we cannot normalize blob types - bucket must allow audio/x-m4a
+  console.log(`[uploadChunk] Chunk ${chunk.index}: type ${chunk.blob.type}, uploading as ${contentType}`);
 
   const { data, error } = await supabase.storage
     .from('recordings')
-    .upload(fileName, normalizedBlob, {
+    .upload(fileName, chunk.blob, {
       contentType,
       upsert: true,
     });
