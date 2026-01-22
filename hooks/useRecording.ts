@@ -144,8 +144,22 @@ export function useRecording(): UseRecordingReturn {
 
         console.log('[useRecording] Preparing to record...');
         await recorder.prepareToRecordAsync();
-        console.log('[useRecording] Starting recording...');
+        console.log('[useRecording] Recorder prepared, starting...');
         recorder.record();
+
+        // Give a brief moment for recording to initialize, then verify
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        console.log('[useRecording] Recording state after start:', {
+          isRecording: recorder.isRecording,
+          uri: recorder.uri,
+          currentTime: recorder.currentTime,
+        });
+
+        if (!recorder.isRecording) {
+          throw new Error('Recording failed to start - recorder not in recording state');
+        }
+
         console.log('[useRecording] Recording started successfully');
       } catch (recordError) {
         console.error('[useRecording] Failed to prepare/start recorder:', recordError);
@@ -247,11 +261,26 @@ export function useRecording(): UseRecordingReturn {
       }
 
       // Native recording stop using expo-audio
-      if (!recorder) {
-        return null;
+      console.log('[useRecording] Stopping native recording...');
+      console.log('[useRecording] Recorder state before stop:', {
+        isRecording: recorder.isRecording,
+        uri: recorder.uri,
+        currentTime: recorder.currentTime,
+      });
+
+      // Check if recorder is actually recording
+      if (!recorder.isRecording) {
+        console.warn('[useRecording] Recorder was not in recording state');
+        // Still try to stop in case there's partial state
       }
 
-      await recorder.stop();
+      try {
+        await recorder.stop();
+        console.log('[useRecording] Recorder stopped successfully');
+      } catch (stopError) {
+        console.error('[useRecording] Failed to stop recorder:', stopError);
+        throw new Error(`Failed to stop recording: ${stopError instanceof Error ? stopError.message : 'Unknown error'}`);
+      }
 
       // Deactivate audio session after stopping
       try {
@@ -263,23 +292,57 @@ export function useRecording(): UseRecordingReturn {
       }
 
       const uri = recorder.uri;
+      console.log('[useRecording] Recording URI after stop:', uri);
+
       if (!uri) {
-        throw new Error('No recording URI');
+        console.error('[useRecording] No recording URI available after stopping');
+        throw new Error('No recording URI - recording may have failed to capture audio');
       }
 
       // Move file to permanent location
       const permanentUri = `${FileSystem.documentDirectory}recordings/${recordingId}.m4a`;
+      console.log('[useRecording] Moving file from:', uri, 'to:', permanentUri);
 
       // Ensure directory exists
-      await FileSystem.makeDirectoryAsync(
-        `${FileSystem.documentDirectory}recordings/`,
-        { intermediates: true }
-      );
+      try {
+        await FileSystem.makeDirectoryAsync(
+          `${FileSystem.documentDirectory}recordings/`,
+          { intermediates: true }
+        );
+      } catch (dirError) {
+        console.warn('[useRecording] Directory may already exist:', dirError);
+        // Directory might already exist, continue
+      }
 
-      await FileSystem.moveAsync({
-        from: uri,
-        to: permanentUri,
-      });
+      try {
+        await FileSystem.moveAsync({
+          from: uri,
+          to: permanentUri,
+        });
+        console.log('[useRecording] File moved successfully');
+      } catch (moveError) {
+        console.error('[useRecording] Failed to move file:', moveError);
+        // Try to use original URI if move fails
+        console.log('[useRecording] Using original URI instead');
+
+        // Create recording with original URI
+        const newRecording: Recording = {
+          id: recordingId,
+          createdAt: new Date().toISOString(),
+          duration: finalDuration,
+          audioUri: uri, // Use original URI
+          status: 'recorded',
+          language: settings.language,
+        };
+
+        addRecording(newRecording);
+        setIsRecording(false);
+        setDuration(0);
+        setMetering(0);
+
+        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return newRecording;
+      }
 
       // Create recording object
       const newRecording: Recording = {
