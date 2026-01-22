@@ -28,6 +28,37 @@ export interface SummarizationResult {
 }
 
 /**
+ * Normalize audio MIME type to standard format
+ * Groq API accepts: audio/webm, audio/mp4, audio/wav, audio/mpeg
+ */
+function normalizeAudioMimeType(blobType: string): { extension: string; mimeType: string } {
+  const type = blobType.toLowerCase();
+
+  // M4A/AAC formats (iOS) -> use audio/mp4
+  if (type.includes('m4a') || type.includes('mp4') || type.includes('aac') || type.includes('mpeg4')) {
+    return { extension: 'm4a', mimeType: 'audio/mp4' };
+  }
+
+  // WebM (web recording)
+  if (type.includes('webm')) {
+    return { extension: 'webm', mimeType: 'audio/webm' };
+  }
+
+  // WAV
+  if (type.includes('wav')) {
+    return { extension: 'wav', mimeType: 'audio/wav' };
+  }
+
+  // MPEG/MP3
+  if (type.includes('mpeg') || type.includes('mp3')) {
+    return { extension: 'mp3', mimeType: 'audio/mpeg' };
+  }
+
+  // Default to webm for unknown
+  return { extension: 'webm', mimeType: 'audio/webm' };
+}
+
+/**
  * Transcribe audio using Groq's Whisper API
  */
 export async function transcribeAudio(
@@ -36,13 +67,12 @@ export async function transcribeAudio(
 ): Promise<TranscriptionResult> {
   const formData = new FormData();
 
-  // Determine file extension based on blob type
-  const mimeType = audioBlob.type || 'audio/webm';
-  const extension = mimeType.includes('webm') ? 'webm' :
-                   mimeType.includes('mp4') || mimeType.includes('m4a') ? 'm4a' :
-                   mimeType.includes('wav') ? 'wav' : 'webm';
+  // Normalize MIME type to standard format accepted by Groq
+  const { extension, mimeType } = normalizeAudioMimeType(audioBlob.type || '');
 
-  // Create a File object from the Blob
+  console.log(`[Groq] Original blob type: ${audioBlob.type}, normalized to: ${mimeType}`);
+
+  // Create a File object with normalized MIME type
   const audioFile = new File([audioBlob], `recording.${extension}`, { type: mimeType });
 
   formData.append('file', audioFile);

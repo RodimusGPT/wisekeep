@@ -3,10 +3,38 @@
 // This allows us to work within Supabase Free tier's 50MB upload limit
 // and Groq's 25MB file size limit
 
+import { Platform } from 'react-native';
+
 // Constants
 const MAX_CHUNK_SIZE_MB = 20; // Stay well under Groq's 25MB limit
 const MAX_CHUNK_SIZE_BYTES = MAX_CHUNK_SIZE_MB * 1024 * 1024;
 const CHUNK_DURATION_MINUTES = 40; // Approximate chunk duration
+
+/**
+ * Normalize audio MIME type to standard format
+ * Handles iOS's non-standard audio/x-m4a type
+ */
+function normalizeAudioMimeType(blobType: string): string {
+  const type = blobType.toLowerCase();
+
+  // M4A/AAC formats (iOS) -> use audio/mp4 (standard)
+  if (type.includes('m4a') || type.includes('mp4') || type.includes('aac') || type.includes('mpeg4')) {
+    return 'audio/mp4';
+  }
+
+  // WebM (web)
+  if (type.includes('webm')) {
+    return 'audio/webm';
+  }
+
+  // WAV
+  if (type.includes('wav')) {
+    return 'audio/wav';
+  }
+
+  // If unknown, use platform default
+  return Platform.OS === 'web' ? 'audio/webm' : 'audio/mp4';
+}
 
 export interface AudioChunk {
   index: number;
@@ -104,7 +132,9 @@ export async function chunkAudioBlob(
 
     // Extract chunk bytes
     const chunkBytes = arrayBuffer.slice(offset, offset + chunkSize);
-    const chunkBlob = new Blob([chunkBytes], { type: audioBlob.type });
+    // Use normalized MIME type to avoid issues with non-standard types like audio/x-m4a
+    const normalizedType = normalizeAudioMimeType(audioBlob.type || '');
+    const chunkBlob = new Blob([chunkBytes], { type: normalizedType });
 
     chunks.push({
       index: chunkIndex,

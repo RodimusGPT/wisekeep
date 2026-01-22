@@ -653,11 +653,21 @@ async function transcribeChunk(audioUrl: string, language: string): Promise<Tran
   }
 
   const audioBlob = await audioResponse.blob();
-  console.log(`Audio fetched successfully: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB`);
+  console.log(`Audio fetched successfully: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB, type: ${audioBlob.type}`);
+
+  // Determine file extension from URL or blob type
+  // iOS uses .m4a, web uses .webm
+  let fileExtension = "webm";
+  if (audioUrl.includes(".m4a") || audioBlob.type?.includes("m4a") || audioBlob.type?.includes("mp4")) {
+    fileExtension = "m4a";
+  } else if (audioUrl.includes(".wav") || audioBlob.type?.includes("wav")) {
+    fileExtension = "wav";
+  }
+  console.log(`Using file extension: ${fileExtension}`);
 
   // Prepare form data for Groq
   const formData = new FormData();
-  formData.append("file", audioBlob, "recording.webm");
+  formData.append("file", audioBlob, `recording.${fileExtension}`);
   formData.append("model", "whisper-large-v3-turbo");
   formData.append("language", language === "zh-TW" ? "zh" : language);
   formData.append("response_format", "verbose_json");

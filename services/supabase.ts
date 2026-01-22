@@ -9,29 +9,46 @@ import { chunkAudioBlob, needsChunking, AudioChunk } from '@/utils/audioChunker'
 /**
  * Get the appropriate file extension and content type for an audio blob
  * Handles both web (webm) and native iOS (m4a) formats
+ * CRITICAL: Normalizes non-standard MIME types to standard ones accepted by Supabase
  */
 function getAudioFormat(blob: Blob): { extension: string; contentType: string } {
   const blobType = blob.type?.toLowerCase() || '';
 
+  console.log(`[getAudioFormat] Input blob type: "${blobType}", Platform: ${Platform.OS}`);
+
   // Handle M4A/AAC formats (iOS native recording)
-  if (blobType.includes('m4a') || blobType.includes('mp4') || blobType.includes('aac') || blobType.includes('x-m4a')) {
+  // Matches: audio/x-m4a, audio/m4a, audio/mp4, audio/aac, audio/mpeg4, etc.
+  if (blobType.includes('m4a') || blobType.includes('mp4') || blobType.includes('aac') || blobType.includes('mpeg4')) {
+    console.log('[getAudioFormat] Detected M4A/AAC format, using audio/mp4');
     return { extension: 'm4a', contentType: 'audio/mp4' };
   }
 
   // Handle WebM format (web recording)
   if (blobType.includes('webm')) {
+    console.log('[getAudioFormat] Detected WebM format');
     return { extension: 'webm', contentType: 'audio/webm' };
   }
 
   // Handle WAV format
   if (blobType.includes('wav')) {
+    console.log('[getAudioFormat] Detected WAV format');
     return { extension: 'wav', contentType: 'audio/wav' };
   }
 
-  // Default to mp4 for unknown types on native, webm for web
+  // Handle MPEG/MP3 format
+  if (blobType.includes('mpeg') || blobType.includes('mp3')) {
+    console.log('[getAudioFormat] Detected MPEG format');
+    return { extension: 'mp3', contentType: 'audio/mpeg' };
+  }
+
+  // Default based on platform - iOS always uses m4a, web uses webm
   if (Platform.OS === 'web') {
+    console.log('[getAudioFormat] Unknown type on web, defaulting to webm');
     return { extension: 'webm', contentType: 'audio/webm' };
   }
+
+  // iOS/Android default to m4a with standard audio/mp4 MIME type
+  console.log('[getAudioFormat] Unknown type on native, defaulting to m4a with audio/mp4');
   return { extension: 'm4a', contentType: 'audio/mp4' };
 }
 
