@@ -112,7 +112,19 @@ export async function chunkAudioBlob(
   }
 
   const chunks: AudioChunk[] = [];
-  const arrayBuffer = await audioBlob.arrayBuffer();
+
+  // Get ArrayBuffer - use fallback for React Native where arrayBuffer() may not exist
+  let arrayBuffer: ArrayBuffer;
+  if (typeof audioBlob.arrayBuffer === 'function') {
+    arrayBuffer = await audioBlob.arrayBuffer();
+  } else {
+    arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(audioBlob);
+    });
+  }
   const totalBytes = arrayBuffer.byteLength;
   const bytesPerSecond = totalBytes / durationSeconds;
 

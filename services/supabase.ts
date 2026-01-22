@@ -346,7 +346,19 @@ export async function uploadAudio(
   // Supabase storage bucket has allowed_mime_types policy that rejects non-standard types like audio/x-m4a
   // On React Native, new Blob([existingBlob], {type}) may not change the type properly
   // So we extract the raw data first, then create a fresh blob with the correct type
-  const arrayBuffer = await audioBlob.arrayBuffer();
+  // Note: Blob.arrayBuffer() may not exist on React Native, use FileReader fallback
+  let arrayBuffer: ArrayBuffer;
+  if (typeof audioBlob.arrayBuffer === 'function') {
+    arrayBuffer = await audioBlob.arrayBuffer();
+  } else {
+    // Fallback for React Native where arrayBuffer() may not exist
+    arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(audioBlob);
+    });
+  }
   const normalizedBlob = new Blob([arrayBuffer], { type: contentType });
   console.log(`[uploadAudio] Normalized blob type: ${normalizedBlob.type}`);
 
@@ -443,7 +455,18 @@ async function uploadChunk(
 
   // Create a new Blob with normalized MIME type (same as uploadAudio)
   // Extract raw data first to ensure type is properly applied on React Native
-  const arrayBuffer = await chunk.blob.arrayBuffer();
+  // Note: Blob.arrayBuffer() may not exist on React Native, use FileReader fallback
+  let arrayBuffer: ArrayBuffer;
+  if (typeof chunk.blob.arrayBuffer === 'function') {
+    arrayBuffer = await chunk.blob.arrayBuffer();
+  } else {
+    arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsArrayBuffer(chunk.blob);
+    });
+  }
   const normalizedBlob = new Blob([arrayBuffer], { type: contentType });
   console.log(`[uploadChunk] Chunk ${chunk.index} normalized: ${chunk.blob.type} -> ${normalizedBlob.type}`);
 
