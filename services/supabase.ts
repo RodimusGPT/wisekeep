@@ -6,6 +6,35 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { chunkAudioBlob, needsChunking, AudioChunk } from '@/utils/audioChunker';
 
+/**
+ * Get the appropriate file extension and content type for an audio blob
+ * Handles both web (webm) and native iOS (m4a) formats
+ */
+function getAudioFormat(blob: Blob): { extension: string; contentType: string } {
+  const blobType = blob.type?.toLowerCase() || '';
+
+  // Handle M4A/AAC formats (iOS native recording)
+  if (blobType.includes('m4a') || blobType.includes('mp4') || blobType.includes('aac') || blobType.includes('x-m4a')) {
+    return { extension: 'm4a', contentType: 'audio/mp4' };
+  }
+
+  // Handle WebM format (web recording)
+  if (blobType.includes('webm')) {
+    return { extension: 'webm', contentType: 'audio/webm' };
+  }
+
+  // Handle WAV format
+  if (blobType.includes('wav')) {
+    return { extension: 'wav', contentType: 'audio/wav' };
+  }
+
+  // Default to mp4 for unknown types on native, webm for web
+  if (Platform.OS === 'web') {
+    return { extension: 'webm', contentType: 'audio/webm' };
+  }
+  return { extension: 'm4a', contentType: 'audio/mp4' };
+}
+
 // Get Supabase credentials from environment
 const SUPABASE_URL = Constants.expoConfig?.extra?.EXPO_PUBLIC_SUPABASE_URL ||
                      process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -291,12 +320,15 @@ export async function uploadAudio(
   recordingId: string,
   audioBlob: Blob
 ): Promise<string> {
-  const fileName = `${userId}/${recordingId}.webm`;
+  const { extension, contentType } = getAudioFormat(audioBlob);
+  const fileName = `${userId}/${recordingId}.${extension}`;
+
+  console.log(`[uploadAudio] Uploading as ${extension} with content type ${contentType}`);
 
   const { data, error } = await supabase.storage
     .from('recordings')
     .upload(fileName, audioBlob, {
-      contentType: 'audio/webm',
+      contentType,
       upsert: true,
     });
 
@@ -319,35 +351,51 @@ export async function uploadAudio(
 
 /**
  * Get signed URL for an audio file
+ * Tries platform-appropriate extension first, then falls back to the other
  */
 export async function getAudioUrl(userId: string, recordingId: string): Promise<string> {
-  const fileName = `${userId}/${recordingId}.webm`;
+  // Try platform-appropriate extension first
+  const primaryExt = Platform.OS === 'web' ? 'webm' : 'm4a';
+  const fallbackExt = Platform.OS === 'web' ? 'm4a' : 'webm';
 
+  // Try primary extension
+  const primaryFileName = `${userId}/${recordingId}.${primaryExt}`;
   const { data, error } = await supabase.storage
     .from('recordings')
-    .createSignedUrl(fileName, 60 * 60); // 1 hour expiry
+    .createSignedUrl(primaryFileName, 60 * 60); // 1 hour expiry
 
-  if (error) {
-    console.error('Error getting audio URL:', error);
-    throw error;
+  if (data?.signedUrl) {
+    return data.signedUrl;
   }
 
-  if (!data?.signedUrl) {
-    throw new Error('Failed to get signed URL');
+  // Try fallback extension
+  const fallbackFileName = `${userId}/${recordingId}.${fallbackExt}`;
+  const { data: fallbackData, error: fallbackError } = await supabase.storage
+    .from('recordings')
+    .createSignedUrl(fallbackFileName, 60 * 60);
+
+  if (fallbackData?.signedUrl) {
+    return fallbackData.signedUrl;
   }
 
-  return data.signedUrl;
+  console.error('Error getting audio URL:', error || fallbackError);
+  throw new Error('Failed to get signed URL - file not found');
 }
 
 /**
  * Delete audio file from storage
+ * Tries to delete both possible extensions to ensure cleanup
  */
 export async function deleteAudio(userId: string, recordingId: string): Promise<void> {
-  const fileName = `${userId}/${recordingId}.webm`;
+  // Try to delete both possible extensions
+  const fileNames = [
+    `${userId}/${recordingId}.m4a`,
+    `${userId}/${recordingId}.webm`,
+  ];
 
   const { error } = await supabase.storage
     .from('recordings')
-    .remove([fileName]);
+    .remove(fileNames);
 
   if (error) {
     console.error('Error deleting audio:', error);
@@ -363,12 +411,13 @@ async function uploadChunk(
   recordingId: string,
   chunk: AudioChunk
 ): Promise<string> {
-  const fileName = `${userId}/${recordingId}_chunk${chunk.index}.webm`;
+  const { extension, contentType } = getAudioFormat(chunk.blob);
+  const fileName = `${userId}/${recordingId}_chunk${chunk.index}.${extension}`;
 
   const { data, error } = await supabase.storage
     .from('recordings')
     .upload(fileName, chunk.blob, {
-      contentType: 'audio/webm',
+      contentType,
       upsert: true,
     });
 
@@ -445,15 +494,18 @@ export async function uploadAudioChunked(
 
 /**
  * Delete all chunks for a recording
+ * Tries to delete both possible extensions to ensure cleanup
  */
 export async function deleteAudioChunks(userId: string, recordingId: string, chunkCount: number): Promise<void> {
-  const fileNames = [];
+  const fileNames: string[] = [];
 
-  // Add main file
+  // Add main files (both extensions)
+  fileNames.push(`${userId}/${recordingId}.m4a`);
   fileNames.push(`${userId}/${recordingId}.webm`);
 
-  // Add chunk files
+  // Add chunk files (both extensions)
   for (let i = 0; i < chunkCount; i++) {
+    fileNames.push(`${userId}/${recordingId}_chunk${i}.m4a`);
     fileNames.push(`${userId}/${recordingId}_chunk${i}.webm`);
   }
 

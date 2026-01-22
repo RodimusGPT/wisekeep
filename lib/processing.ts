@@ -23,8 +23,8 @@ export async function uploadAudioFile(
       encoding: FileSystem.EncodingType.Base64,
     });
 
-    // Convert to Blob
-    const response = await fetch(`data:audio/m4a;base64,${base64}`);
+    // Convert to Blob - use standard audio/mp4 MIME type for M4A files
+    const response = await fetch(`data:audio/mp4;base64,${base64}`);
     const blob = await response.blob();
 
     // Upload to Supabase Storage
@@ -32,7 +32,7 @@ export async function uploadAudioFile(
     const { data, error } = await supabase.storage
       .from('recordings')
       .upload(filePath, blob, {
-        contentType: 'audio/m4a',
+        contentType: 'audio/mp4',
         upsert: true,
       });
 
