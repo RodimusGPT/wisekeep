@@ -131,8 +131,11 @@ export function useRecording(): UseRecordingReturn {
         // Configure audio session for recording (iOS requirement)
         console.log('[useRecording] Configuring audio session...');
         await setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
+          allowsRecording: true,
+          playsInSilentMode: true,
+          interruptionMode: 'doNotMix',
+          shouldPlayInBackground: false,
+          shouldRouteThroughEarpiece: false,
         });
 
         // Activate audio session
