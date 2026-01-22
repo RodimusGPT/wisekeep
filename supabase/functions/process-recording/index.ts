@@ -655,6 +655,16 @@ async function transcribeChunk(audioUrl: string, language: string): Promise<Tran
   const audioBlob = await audioResponse.blob();
   console.log(`Audio fetched successfully: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB, type: ${audioBlob.type}`);
 
+  // Normalize MIME type for Groq API (convert non-standard types like audio/x-m4a to audio/mp4)
+  // Groq rejects non-standard MIME types, so we need to convert them
+  let normalizedBlob = audioBlob;
+  const blobType = audioBlob.type?.toLowerCase() || '';
+  if (blobType.includes('x-m4a') || blobType.includes('x-mp4') || blobType.includes('x-aac')) {
+    console.log(`Normalizing MIME type from ${audioBlob.type} to audio/mp4`);
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    normalizedBlob = new Blob([arrayBuffer], { type: 'audio/mp4' });
+  }
+
   // Determine file extension from URL or blob type
   // iOS uses .m4a, web uses .webm
   let fileExtension = "webm";
@@ -667,7 +677,7 @@ async function transcribeChunk(audioUrl: string, language: string): Promise<Tran
 
   // Prepare form data for Groq
   const formData = new FormData();
-  formData.append("file", audioBlob, `recording.${fileExtension}`);
+  formData.append("file", normalizedBlob, `recording.${fileExtension}`);
   formData.append("model", "whisper-large-v3-turbo");
   formData.append("language", language === "zh-TW" ? "zh" : language);
   formData.append("response_format", "verbose_json");
