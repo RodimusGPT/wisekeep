@@ -28,7 +28,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   // Apply playback speed when player is ready
   useEffect(() => {
     if (player && isLoaded) {
-      player.playbackRate = playbackSpeed === 'slow' ? 0.75 : 1.0;
+      player.setPlaybackRate(playbackSpeed === 'slow' ? 0.75 : 1.0);
     }
   }, [player, isLoaded, playbackSpeed]);
 
@@ -93,7 +93,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const setSpeed = useCallback((speed: 'normal' | 'slow') => {
     setPlaybackSpeed(speed);
     if (player && isLoaded) {
-      player.playbackRate = speed === 'slow' ? 0.75 : 1.0;
+      player.setPlaybackRate(speed === 'slow' ? 0.75 : 1.0);
     }
   }, [player, isLoaded]);
 
