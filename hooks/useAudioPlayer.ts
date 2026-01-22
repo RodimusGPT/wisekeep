@@ -1,5 +1,10 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { useAudioPlayer as useExpoAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
+import { Platform } from 'react-native';
+import {
+  useAudioPlayer as useExpoAudioPlayer,
+  useAudioPlayerStatus,
+  setAudioModeAsync,
+} from 'expo-audio';
 
 interface UseAudioPlayerReturn {
   isPlaying: boolean;
@@ -53,6 +58,23 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     }
 
     try {
+      // Configure audio session for playback on iOS
+      // This ensures audio plays in silent mode and doesn't interrupt other apps
+      if (Platform.OS !== 'web') {
+        try {
+          await setAudioModeAsync({
+            playsInSilentMode: true,
+            interruptionMode: 'mixWithOthers',
+            allowsRecording: false,
+            shouldPlayInBackground: false,
+            shouldRouteThroughEarpiece: false,
+          });
+        } catch (audioModeError) {
+          console.warn('[AudioPlayer] Failed to configure audio mode:', audioModeError);
+          // Continue playing anyway
+        }
+      }
+
       console.log('[AudioPlayer] Playing...');
       player.play();
     } catch (error) {

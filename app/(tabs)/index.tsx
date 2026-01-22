@@ -171,11 +171,18 @@ export default function HomeScreen() {
     }
 
     try {
-      // Step 1: Fetch the audio blob
-      console.log('Fetching audio blob from:', audioUri);
+      // Step 1: Fetch the audio blob from local file
+      console.log('[saveRecordingOnly] Fetching audio blob from:', audioUri);
       const response = await fetch(audioUri);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch audio file: ${response.status} ${response.statusText}`);
+      }
       const audioBlob = await response.blob();
-      console.log('Audio blob size:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
+      // Log blob details for debugging MIME type issues
+      console.log('[saveRecordingOnly] Audio blob fetched:', {
+        size: `${(audioBlob.size / 1024 / 1024).toFixed(2)} MB`,
+        type: audioBlob.type || 'unknown (will be normalized)',
+      });
 
       // Step 2: Upload with automatic chunking
       console.log('Uploading audio (with chunking if needed)...');
@@ -245,11 +252,18 @@ export default function HomeScreen() {
     }
 
     try {
-      // Step 1: Fetch the audio blob
-      console.log('Fetching audio blob from:', audioUri);
+      // Step 1: Fetch the audio blob from local file
+      console.log('[processRecording] Fetching audio blob from:', audioUri);
       const response = await fetch(audioUri);
+      if (!response.ok) {
+        throw new Error(`Failed to fetch audio file: ${response.status} ${response.statusText}`);
+      }
       const audioBlob = await response.blob();
-      console.log('Audio blob size:', (audioBlob.size / 1024 / 1024).toFixed(2), 'MB');
+      // Log blob details for debugging MIME type issues
+      console.log('[processRecording] Audio blob fetched:', {
+        size: `${(audioBlob.size / 1024 / 1024).toFixed(2)} MB`,
+        type: audioBlob.type || 'unknown (will be normalized)',
+      });
 
       // Step 2: Upload with automatic chunking
       // Use authUserId for storage paths (matches Supabase Storage RLS policy using auth.uid())
