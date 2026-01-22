@@ -130,11 +130,12 @@ export async function chunkAudioBlob(
     const startTime = currentTime;
     const endTime = currentTime + chunkDuration;
 
-    // Extract chunk bytes
+    // Extract chunk bytes from ArrayBuffer (raw data, not from Blob)
     const chunkBytes = arrayBuffer.slice(offset, offset + chunkSize);
     // Use normalized MIME type to avoid issues with non-standard types like audio/x-m4a
     const normalizedType = normalizeAudioMimeType(audioBlob.type || '');
     const chunkBlob = new Blob([chunkBytes], { type: normalizedType });
+    console.log(`[audioChunker] Chunk ${chunkIndex}: original type "${audioBlob.type}" -> normalized "${chunkBlob.type}"`);
 
     chunks.push({
       index: chunkIndex,
