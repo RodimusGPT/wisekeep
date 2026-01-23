@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
-import * as FileSystem from 'expo-file-system';
+import { File as ExpoFile } from 'expo-file-system';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
 import { useI18n, useRecording, useAuth, useTheme } from '@/hooks';
@@ -188,16 +188,20 @@ export default function HomeScreen() {
         audioData = await response.blob();
         console.log('[saveRecordingOnly] Web blob size:', audioData.size);
       } else {
-        // iOS/Android: Read file as base64 string - uploadAudio will handle conversion
-        // This avoids the broken Blob polyfill in React Native
-        audioData = await FileSystem.readAsStringAsync(audioUri, {
-          encoding: 'base64', // Use string literal - EncodingType.Base64 may be undefined on iOS
-        });
-        console.log('[saveRecordingOnly] Native base64 length:', audioData.length);
-
-        if (audioData.length === 0) {
+        // iOS/Android: Use the new expo-file-system File class
+        // File implements Blob interface, so we can use file.base64() to get base64 data
+        const file = new ExpoFile(audioUri);
+        if (!file.exists) {
+          throw new Error('Audio file does not exist');
+        }
+        if (file.size === 0) {
           throw new Error('Audio file is empty - recording may have failed');
         }
+        console.log('[saveRecordingOnly] Native file size:', file.size);
+
+        // Read as base64 - uploadAudio will convert to ArrayBuffer
+        audioData = await file.base64();
+        console.log('[saveRecordingOnly] Native base64 length:', audioData.length);
       }
 
       // Step 2: Upload with automatic chunking
@@ -284,16 +288,20 @@ export default function HomeScreen() {
         audioData = await response.blob();
         console.log('[processRecording] Web blob size:', audioData.size);
       } else {
-        // iOS/Android: Read file as base64 string - uploadAudio will handle conversion
-        // This avoids the broken Blob polyfill in React Native
-        audioData = await FileSystem.readAsStringAsync(audioUri, {
-          encoding: 'base64', // Use string literal - EncodingType.Base64 may be undefined on iOS
-        });
-        console.log('[processRecording] Native base64 length:', audioData.length);
-
-        if (audioData.length === 0) {
+        // iOS/Android: Use the new expo-file-system File class
+        // File implements Blob interface, so we can use file.base64() to get base64 data
+        const file = new ExpoFile(audioUri);
+        if (!file.exists) {
+          throw new Error('Audio file does not exist');
+        }
+        if (file.size === 0) {
           throw new Error('Audio file is empty - recording may have failed');
         }
+        console.log('[processRecording] Native file size:', file.size);
+
+        // Read as base64 - uploadAudio will convert to ArrayBuffer
+        audioData = await file.base64();
+        console.log('[processRecording] Native base64 length:', audioData.length);
       }
 
       // Step 2: Upload with automatic chunking

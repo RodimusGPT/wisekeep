@@ -1,6 +1,7 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { Recording, NoteLine } from '@/types';
-import * as FileSystem from 'expo-file-system';
+import { File as ExpoFile } from 'expo-file-system';
+import { decode } from 'base-64';
 
 // Upload audio file to Supabase Storage
 export async function uploadAudioFile(
@@ -13,25 +14,26 @@ export async function uploadAudioFile(
   }
 
   try {
-    const fileInfo = await FileSystem.getInfoAsync(localUri);
-    if (!fileInfo.exists) {
+    // Use the new expo-file-system File class
+    const file = new ExpoFile(localUri);
+    if (!file.exists) {
       throw new Error('Audio file does not exist');
     }
 
-    // Read file as base64
-    const base64 = await FileSystem.readAsStringAsync(localUri, {
-      encoding: 'base64', // Use string literal - EncodingType.Base64 may be undefined on iOS
-    });
-
-    // Convert to Blob - use standard audio/mp4 MIME type for M4A files
-    const response = await fetch(`data:audio/mp4;base64,${base64}`);
-    const blob = await response.blob();
+    // Read file as base64 and convert to ArrayBuffer for Supabase
+    const base64 = await file.base64();
+    const binaryString = decode(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const arrayBuffer = bytes.buffer;
 
     // Upload to Supabase Storage
     const filePath = `${recordingId}.m4a`;
     const { data, error } = await supabase.storage
       .from('recordings')
-      .upload(filePath, blob, {
+      .upload(filePath, arrayBuffer, {
         contentType: 'audio/mp4',
         upsert: true,
       });
