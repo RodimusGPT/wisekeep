@@ -719,6 +719,21 @@ async function transcribeBlobDirect(
 
   const result = await response.json();
 
+  // Log detailed diagnostics about what Groq returned
+  const segmentCount = result.segments?.length || 0;
+  const firstSegment = result.segments?.[0];
+  const lastSegment = result.segments?.[segmentCount - 1];
+  const reportedDuration = result.duration;
+
+  console.log(`[Groq Response] Duration reported by Groq: ${reportedDuration?.toFixed(1) || 'N/A'} seconds`);
+  console.log(`[Groq Response] Segment count: ${segmentCount}`);
+  if (firstSegment && lastSegment) {
+    console.log(`[Groq Response] First segment: ${firstSegment.start?.toFixed(1)}s - ${firstSegment.end?.toFixed(1)}s`);
+    console.log(`[Groq Response] Last segment: ${lastSegment.start?.toFixed(1)}s - ${lastSegment.end?.toFixed(1)}s`);
+    console.log(`[Groq Response] Total transcribed time range: 0s to ${lastSegment.end?.toFixed(1)}s`);
+  }
+  console.log(`[Groq Response] Text length: ${result.text?.length || 0} chars`);
+
   return {
     text: result.text,
     segments: result.segments?.map((seg: { start: number; end: number; text: string }) => ({
@@ -760,6 +775,14 @@ async function transcribeChunk(
   console.log(`[Audio Fetch] Blob size: ${audioBlob.size} bytes (${(audioBlob.size / 1024 / 1024).toFixed(2)}MB)`);
   console.log(`[Audio Fetch] Blob type: "${audioBlob.type}"`);
 
+  // Estimate expected duration based on file size (M4A typically ~64-128 kbps for voice)
+  // This helps detect if the uploaded file was truncated
+  const estimatedMinBitrate = 64 * 1024 / 8; // 64 kbps = 8 KB/s
+  const estimatedMaxBitrate = 128 * 1024 / 8; // 128 kbps = 16 KB/s
+  const estimatedMinDuration = audioBlob.size / estimatedMaxBitrate;
+  const estimatedMaxDuration = audioBlob.size / estimatedMinBitrate;
+  console.log(`[Audio Fetch] Estimated duration from file size: ${(estimatedMinDuration/60).toFixed(1)} - ${(estimatedMaxDuration/60).toFixed(1)} minutes`);
+
   // Check if file is empty BEFORE sending to Groq
   if (audioBlob.size === 0) {
     console.error(`[Audio Fetch] ERROR: File is empty! URL may be invalid or file doesn't exist.`);
@@ -792,65 +815,17 @@ async function transcribeChunk(
 
   console.log(`File extension: ${fileExtension}, MIME type: ${normalizedBlob.type}`);
 
-  // Check if file exceeds Groq's size limit and needs server-side chunking
+  // NOTE: Server-side byte-splitting is DISABLED because it corrupts M4A/MP4 container format.
+  // M4A files have headers and atom structures that can't be split at arbitrary byte boundaries.
+  // Instead, we send the full file to Groq and let their API handle it.
+  // If the file is too large, Groq will return an error which we'll handle gracefully.
+
   if (normalizedBlob.size > GROQ_MAX_FILE_SIZE_BYTES) {
-    console.log(`[Server Chunking] File size ${(normalizedBlob.size / 1024 / 1024).toFixed(1)}MB exceeds ${GROQ_MAX_FILE_SIZE_MB}MB limit`);
-
-    // Calculate duration for this chunk (use provided times or estimate from file size)
-    const chunkDuration = chunkEndTime > chunkStartTime
-      ? chunkEndTime - chunkStartTime
-      : normalizedBlob.size / (128 * 1024 / 8); // Estimate: ~128kbps audio
-
-    // Split into sub-chunks
-    const subChunks = splitAudioBlob(normalizedBlob, chunkDuration, normalizedMimeType);
-
-    // Transcribe each sub-chunk and combine results
-    let combinedText = "";
-    const combinedSegments: TranscriptionSegment[] = [];
-    const isTraditionalChinese = language === "zh-TW";
-
-    for (const subChunk of subChunks) {
-      console.log(`[Server Chunking] Processing sub-chunk ${subChunk.index + 1}/${subChunks.length} (${(subChunk.blob.size / 1024 / 1024).toFixed(1)}MB)`);
-
-      const subResult = await transcribeBlobDirect(subChunk.blob, language, fileExtension, groqApiKey);
-
-      // Convert to Traditional Chinese if needed
-      let subText = subResult.text;
-      if (isTraditionalChinese && subText) {
-        subText = toTraditionalChinese(subText);
-      }
-
-      // Combine text
-      if (combinedText && subText) {
-        combinedText += " ";
-      }
-      combinedText += subText;
-
-      // Adjust segment timestamps for sub-chunk offset
-      if (subResult.segments) {
-        for (const seg of subResult.segments) {
-          let segText = seg.text;
-          if (isTraditionalChinese && segText) {
-            segText = toTraditionalChinese(segText);
-          }
-          combinedSegments.push({
-            start: seg.start + subChunk.startTime,
-            end: seg.end + subChunk.startTime,
-            text: segText,
-          });
-        }
-      }
-    }
-
-    console.log(`[Server Chunking] Combined ${subChunks.length} sub-chunks, total text length: ${combinedText.length}`);
-
-    return {
-      text: combinedText,
-      segments: combinedSegments,
-    };
+    console.log(`[Transcription] WARNING: File size ${(normalizedBlob.size / 1024 / 1024).toFixed(1)}MB exceeds recommended ${GROQ_MAX_FILE_SIZE_MB}MB limit`);
+    console.log(`[Transcription] Attempting to transcribe full file anyway (Groq may support larger files)`);
   }
 
-  // File is small enough - transcribe directly
+  // Transcribe the full file
   return transcribeBlobDirect(normalizedBlob, language, fileExtension, groqApiKey);
 }
 
@@ -1055,7 +1030,22 @@ Deno.serve(async (req) => {
     console.log(`[${recording_id}] Starting transcription of ${chunkCount} chunk(s)...`);
     const { fullText, notes } = await transcribeAllChunks(audio_chunks, language);
 
+    // Calculate actual transcribed duration from segments
+    const lastNote = notes[notes.length - 1];
+    const actualTranscribedDuration = lastNote ? lastNote.timestamp : 0;
+    const expectedDuration = duration_seconds;
+    const durationDifference = expectedDuration - actualTranscribedDuration;
+    const coveragePercent = expectedDuration > 0 ? (actualTranscribedDuration / expectedDuration * 100).toFixed(1) : 'N/A';
+
     console.log(`[${recording_id}] Transcription complete: ${fullText.length} chars, ${notes.length} segments`);
+    console.log(`[${recording_id}] Duration analysis:`);
+    console.log(`[${recording_id}]   - Expected duration: ${expectedDuration.toFixed(1)}s (${(expectedDuration/60).toFixed(1)} min)`);
+    console.log(`[${recording_id}]   - Last segment timestamp: ${actualTranscribedDuration.toFixed(1)}s (${(actualTranscribedDuration/60).toFixed(1)} min)`);
+    console.log(`[${recording_id}]   - Coverage: ${coveragePercent}%`);
+
+    if (durationDifference > 60) {
+      console.warn(`[${recording_id}] WARNING: Transcription may be incomplete! Missing ${(durationDifference/60).toFixed(1)} minutes of audio`);
+    }
 
     // Update with notes
     currentStep = "update_status_notes";

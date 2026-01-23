@@ -262,11 +262,22 @@ export function useRecording(): UseRecordingReturn {
 
       // Native recording stop using expo-audio
       console.log('[useRecording] Stopping native recording...');
+      const recorderCurrentTime = recorder.currentTime;
       console.log('[useRecording] Recorder state before stop:', {
         isRecording: recorder.isRecording,
         uri: recorder.uri,
-        currentTime: recorder.currentTime,
+        currentTime: recorderCurrentTime,
       });
+
+      // Compare wall-clock duration vs recorder's reported time
+      console.log('[useRecording] Duration comparison:', {
+        wallClockDuration: finalDuration,
+        recorderCurrentTime: recorderCurrentTime,
+        difference: Math.abs(finalDuration - recorderCurrentTime),
+      });
+
+      // Prefer recorder's reported time if available and reasonable
+      const effectiveDuration = recorderCurrentTime > 0 ? Math.floor(recorderCurrentTime) : finalDuration;
 
       // Check if recorder is actually recording
       if (!recorder.isRecording) {
@@ -320,6 +331,26 @@ export function useRecording(): UseRecordingReturn {
           to: permanentUri,
         });
         console.log('[useRecording] File moved successfully');
+
+        // Verify file size after move
+        const fileInfo = await FileSystem.getInfoAsync(permanentUri);
+        if (fileInfo.exists && 'size' in fileInfo) {
+          const fileSizeMB = (fileInfo.size as number) / 1024 / 1024;
+          // Estimate expected size: M4A voice ~8KB/s to 16KB/s
+          const expectedMinSize = effectiveDuration * 8 * 1024; // 64 kbps
+          const expectedMaxSize = effectiveDuration * 16 * 1024; // 128 kbps
+          console.log('[useRecording] File verification:', {
+            actualSizeBytes: fileInfo.size,
+            actualSizeMB: fileSizeMB.toFixed(2),
+            expectedMinBytes: expectedMinSize,
+            expectedMaxBytes: expectedMaxSize,
+            durationSeconds: effectiveDuration,
+          });
+
+          if ((fileInfo.size as number) < expectedMinSize * 0.5) {
+            console.warn('[useRecording] WARNING: File appears too small for recorded duration!');
+          }
+        }
       } catch (moveError) {
         console.error('[useRecording] Failed to move file:', moveError);
         // Try to use original URI if move fails
@@ -329,7 +360,7 @@ export function useRecording(): UseRecordingReturn {
         const newRecording: Recording = {
           id: recordingId,
           createdAt: new Date().toISOString(),
-          duration: finalDuration,
+          duration: effectiveDuration,
           audioUri: uri, // Use original URI
           status: 'recorded',
           language: settings.language,
@@ -348,11 +379,18 @@ export function useRecording(): UseRecordingReturn {
       const newRecording: Recording = {
         id: recordingId,
         createdAt: new Date().toISOString(),
-        duration: finalDuration,
+        duration: effectiveDuration,
         audioUri: permanentUri,
         status: 'recorded', // Will be uploaded next, not processing yet
         language: settings.language,
       };
+
+      console.log('[useRecording] Created recording:', {
+        id: recordingId,
+        effectiveDuration,
+        wallClockDuration: finalDuration,
+        recorderTime: recorderCurrentTime,
+      });
 
       // Add to store
       addRecording(newRecording);
