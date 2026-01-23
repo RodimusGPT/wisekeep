@@ -658,22 +658,23 @@ async function transcribeChunk(audioUrl: string, language: string): Promise<Tran
   // Normalize MIME type for Groq API (convert non-standard types like audio/x-m4a to audio/mp4)
   // Groq rejects non-standard MIME types, so we need to convert them
   let normalizedBlob = audioBlob;
+  let fileExtension = "webm"; // default for web
   const blobType = audioBlob.type?.toLowerCase() || '';
+
   if (blobType.includes('x-m4a') || blobType.includes('x-mp4') || blobType.includes('x-aac')) {
     console.log(`Normalizing MIME type from ${audioBlob.type} to audio/mp4`);
     const arrayBuffer = await audioBlob.arrayBuffer();
     normalizedBlob = new Blob([arrayBuffer], { type: 'audio/mp4' });
-  }
-
-  // Determine file extension from URL or blob type
-  // iOS uses .m4a, web uses .webm
-  let fileExtension = "webm";
-  if (audioUrl.includes(".m4a") || audioBlob.type?.includes("m4a") || audioBlob.type?.includes("mp4")) {
-    fileExtension = "m4a";
+    fileExtension = "mp4"; // Use mp4 extension to match normalized MIME type
+  } else if (audioUrl.includes(".m4a") || audioBlob.type?.includes("m4a") || audioBlob.type?.includes("mp4")) {
+    fileExtension = "mp4"; // Standard mp4 extension for audio/mp4
   } else if (audioUrl.includes(".wav") || audioBlob.type?.includes("wav")) {
     fileExtension = "wav";
+  } else if (audioBlob.type?.includes("webm")) {
+    fileExtension = "webm";
   }
-  console.log(`Using file extension: ${fileExtension}`);
+
+  console.log(`File extension: ${fileExtension}, MIME type: ${normalizedBlob.type}`);
 
   // Prepare form data for Groq
   const formData = new FormData();
@@ -693,8 +694,13 @@ async function transcribeChunk(audioUrl: string, language: string): Promise<Tran
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("Groq transcription error:", errorText);
-    throw new Error(`Transcription failed: ${response.status}`);
+    console.error(`[Groq API Error] Status: ${response.status}`);
+    console.error(`[Groq API Error] Response: ${errorText}`);
+    console.error(`[Groq API Error] File extension: ${fileExtension}`);
+    console.error(`[Groq API Error] Blob type: ${audioBlob.type}`);
+    console.error(`[Groq API Error] Normalized type: ${normalizedBlob.type}`);
+    console.error(`[Groq API Error] Blob size: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB`);
+    throw new Error(`Groq API error (${response.status}): ${errorText}`);
   }
 
   const result = await response.json();

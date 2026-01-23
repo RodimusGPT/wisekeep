@@ -347,25 +347,17 @@ export default function RecordingDetailScreen() {
       return;
     }
 
-    // Get the audio URL - either from local state or fetch from database
-    let audioUrl = recording.audioRemoteUrl;
-    console.log('[Transcribe] Audio URL from state:', audioUrl);
-
-    if (!audioUrl) {
-      try {
-        const dbRecording = await fetchRecordingById(recording.id);
-        if (dbRecording?.audio_url) {
-          audioUrl = dbRecording.audio_url;
-          // Update local state so we don't need to fetch again
-          updateRecording(recording.id, { audioRemoteUrl: audioUrl });
-        }
-      } catch (error) {
-        console.error('Error fetching audio URL from database:', error);
-      }
-    }
-
-    if (!audioUrl) {
-      Alert.alert(t.error, '錄音尚未上傳完成，請稍後再試');
+    // CRITICAL: Generate a FRESH signed URL for the audio file
+    // Don't use the old URL from database as it may have expired (24h TTL)
+    let audioUrl: string;
+    try {
+      console.log('[Transcribe] Generating fresh signed URL for audio file...');
+      const { getAudioUrl } = await import('@/services/supabase');
+      audioUrl = await getAudioUrl(user.id, recording.id);
+      console.log('[Transcribe] Fresh audio URL generated:', audioUrl.substring(0, 80) + '...');
+    } catch (error) {
+      console.error('[Transcribe] Error generating fresh audio URL:', error);
+      Alert.alert(t.error, '無法獲取錄音檔案，請稍後再試');
       return;
     }
 
