@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   Alert,
   TouchableOpacity,
   Platform,
+  Animated,
+  Easing,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -63,6 +65,32 @@ export default function RecordingDetailScreen() {
   const [usage, setUsage] = useState<ComprehensiveUsage | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingRecording, setIsLoadingRecording] = useState(!recording);
+
+  // Spinning animation for processing indicator
+  const spinAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isProcessing) {
+      // Start continuous spinning animation
+      const spin = Animated.loop(
+        Animated.timing(spinAnim, {
+          toValue: 1,
+          duration: 1500,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        })
+      );
+      spin.start();
+      return () => spin.stop();
+    } else {
+      spinAnim.setValue(0);
+    }
+  }, [isProcessing, spinAnim]);
+
+  const spinInterpolate = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
 
   const {
     isPlaying,
@@ -652,11 +680,18 @@ export default function RecordingDetailScreen() {
       {/* Content */}
       <View style={styles.contentContainer}>
         {isProcessing ? (
-          <View style={styles.emptyContent}>
+          <View style={styles.processingContent}>
+            <Animated.View style={{ transform: [{ rotate: spinInterpolate }] }}>
+              <Ionicons
+                name="sync-outline"
+                size={48}
+                color={Colors.processing}
+              />
+            </Animated.View>
             <Text
               style={[
-                styles.emptyText,
-                { color: secondaryColor, fontSize: getFontSize('body', textSize) },
+                styles.processingText,
+                { color: Colors.processing, fontSize: getFontSize('body', textSize) },
               ]}
             >
               {recording.status === 'processing_notes'
@@ -664,6 +699,14 @@ export default function RecordingDetailScreen() {
                 : recording.status === 'processing_summary'
                   ? t.findingKeyPoints
                   : t.processing}
+            </Text>
+            <Text
+              style={[
+                styles.processingHint,
+                { color: secondaryColor, fontSize: getFontSize('small', textSize) },
+              ]}
+            >
+              {t.mayTakeFewMinutes}
             </Text>
           </View>
         ) : recording.status === 'recorded' ? (
@@ -876,6 +919,22 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: 'center',
     lineHeight: 28,
+  },
+  processingContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    gap: 16,
+  },
+  processingText: {
+    textAlign: 'center',
+    fontWeight: '600',
+    marginTop: 8,
+  },
+  processingHint: {
+    textAlign: 'center',
+    opacity: 0.7,
   },
   actionButtons: {
     flexDirection: 'row',
