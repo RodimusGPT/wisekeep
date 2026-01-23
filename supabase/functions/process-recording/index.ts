@@ -6,6 +6,11 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
+// Groq Whisper has a 25MB file size limit
+// We chunk files larger than 20MB to stay safely under the limit
+const GROQ_MAX_FILE_SIZE_MB = 20;
+const GROQ_MAX_FILE_SIZE_BYTES = GROQ_MAX_FILE_SIZE_MB * 1024 * 1024;
+
 // Types
 interface AudioChunk {
   url: string;
@@ -636,8 +641,102 @@ async function updateRecordingStatus(
   }
 }
 
+// Split a large audio blob into smaller chunks for Groq processing
+interface ServerAudioChunk {
+  blob: Blob;
+  startTime: number;
+  endTime: number;
+  index: number;
+}
+
+function splitAudioBlob(
+  audioBlob: Blob,
+  durationSeconds: number,
+  mimeType: string
+): ServerAudioChunk[] {
+  const totalBytes = audioBlob.size;
+  const bytesPerSecond = totalBytes / durationSeconds;
+  const chunks: ServerAudioChunk[] = [];
+
+  let offset = 0;
+  let chunkIndex = 0;
+  let currentTime = 0;
+
+  // We need to work with ArrayBuffer for slicing
+  // This will be done asynchronously in the caller
+  const numChunks = Math.ceil(totalBytes / GROQ_MAX_FILE_SIZE_BYTES);
+  const chunkSize = Math.ceil(totalBytes / numChunks);
+
+  while (offset < totalBytes) {
+    const remainingBytes = totalBytes - offset;
+    const thisChunkSize = Math.min(chunkSize, remainingBytes);
+    const chunkDuration = thisChunkSize / bytesPerSecond;
+    const startTime = currentTime;
+    const endTime = currentTime + chunkDuration;
+
+    chunks.push({
+      blob: audioBlob.slice(offset, offset + thisChunkSize, mimeType),
+      startTime,
+      endTime,
+      index: chunkIndex,
+    });
+
+    offset += thisChunkSize;
+    chunkIndex++;
+    currentTime = endTime;
+  }
+
+  console.log(`[Server Chunking] Split ${(totalBytes / 1024 / 1024).toFixed(1)}MB file into ${chunks.length} chunks`);
+  return chunks;
+}
+
+// Transcribe a single audio blob (sub-chunk) directly
+async function transcribeBlobDirect(
+  audioBlob: Blob,
+  language: string,
+  fileExtension: string,
+  groqApiKey: string
+): Promise<TranscriptionResult> {
+  const formData = new FormData();
+  formData.append("file", audioBlob, `recording.${fileExtension}`);
+  formData.append("model", "whisper-large-v3-turbo");
+  formData.append("language", language === "zh-TW" ? "zh" : language);
+  formData.append("response_format", "verbose_json");
+
+  const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${groqApiKey}`,
+    },
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`[Groq API Error] Status: ${response.status}, Response: ${errorText}`);
+    throw new Error(`Groq API error (${response.status}): ${errorText}`);
+  }
+
+  const result = await response.json();
+
+  return {
+    text: result.text,
+    segments: result.segments?.map((seg: { start: number; end: number; text: string }) => ({
+      start: seg.start,
+      end: seg.end,
+      text: seg.text,
+    })),
+  };
+}
+
 // Transcribe a single audio chunk using Groq Whisper
-async function transcribeChunk(audioUrl: string, language: string): Promise<TranscriptionResult> {
+// Handles server-side splitting if file exceeds Groq's size limit
+async function transcribeChunk(
+  audioUrl: string,
+  language: string,
+  chunkStartTime: number = 0,
+  chunkEndTime: number = 0
+): Promise<TranscriptionResult> {
   const groqApiKey = Deno.env.get("GROQ_API_KEY");
   if (!groqApiKey) {
     throw new Error("GROQ_API_KEY not configured");
@@ -672,59 +771,87 @@ async function transcribeChunk(audioUrl: string, language: string): Promise<Tran
   let normalizedBlob = audioBlob;
   let fileExtension = "webm"; // default for web
   const blobType = audioBlob.type?.toLowerCase() || '';
+  let normalizedMimeType = "audio/webm";
 
   if (blobType.includes('x-m4a') || blobType.includes('x-mp4') || blobType.includes('x-aac')) {
     console.log(`Normalizing MIME type from ${audioBlob.type} to audio/mp4`);
     const arrayBuffer = await audioBlob.arrayBuffer();
     normalizedBlob = new Blob([arrayBuffer], { type: 'audio/mp4' });
-    fileExtension = "mp4"; // Use mp4 extension to match normalized MIME type
+    fileExtension = "mp4";
+    normalizedMimeType = "audio/mp4";
   } else if (audioUrl.includes(".m4a") || audioBlob.type?.includes("m4a") || audioBlob.type?.includes("mp4")) {
-    fileExtension = "mp4"; // Standard mp4 extension for audio/mp4
+    fileExtension = "mp4";
+    normalizedMimeType = "audio/mp4";
   } else if (audioUrl.includes(".wav") || audioBlob.type?.includes("wav")) {
     fileExtension = "wav";
+    normalizedMimeType = "audio/wav";
   } else if (audioBlob.type?.includes("webm")) {
     fileExtension = "webm";
+    normalizedMimeType = "audio/webm";
   }
 
   console.log(`File extension: ${fileExtension}, MIME type: ${normalizedBlob.type}`);
 
-  // Prepare form data for Groq
-  const formData = new FormData();
-  formData.append("file", normalizedBlob, `recording.${fileExtension}`);
-  formData.append("model", "whisper-large-v3-turbo");
-  formData.append("language", language === "zh-TW" ? "zh" : language);
-  formData.append("response_format", "verbose_json");
+  // Check if file exceeds Groq's size limit and needs server-side chunking
+  if (normalizedBlob.size > GROQ_MAX_FILE_SIZE_BYTES) {
+    console.log(`[Server Chunking] File size ${(normalizedBlob.size / 1024 / 1024).toFixed(1)}MB exceeds ${GROQ_MAX_FILE_SIZE_MB}MB limit`);
 
-  // Call Groq Whisper API
-  const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${groqApiKey}`,
-    },
-    body: formData,
-  });
+    // Calculate duration for this chunk (use provided times or estimate from file size)
+    const chunkDuration = chunkEndTime > chunkStartTime
+      ? chunkEndTime - chunkStartTime
+      : normalizedBlob.size / (128 * 1024 / 8); // Estimate: ~128kbps audio
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[Groq API Error] Status: ${response.status}`);
-    console.error(`[Groq API Error] Response: ${errorText}`);
-    console.error(`[Groq API Error] File extension: ${fileExtension}`);
-    console.error(`[Groq API Error] Blob type: ${audioBlob.type}`);
-    console.error(`[Groq API Error] Normalized type: ${normalizedBlob.type}`);
-    console.error(`[Groq API Error] Blob size: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB`);
-    throw new Error(`Groq API error (${response.status}): ${errorText}`);
+    // Split into sub-chunks
+    const subChunks = splitAudioBlob(normalizedBlob, chunkDuration, normalizedMimeType);
+
+    // Transcribe each sub-chunk and combine results
+    let combinedText = "";
+    const combinedSegments: TranscriptionSegment[] = [];
+    const isTraditionalChinese = language === "zh-TW";
+
+    for (const subChunk of subChunks) {
+      console.log(`[Server Chunking] Processing sub-chunk ${subChunk.index + 1}/${subChunks.length} (${(subChunk.blob.size / 1024 / 1024).toFixed(1)}MB)`);
+
+      const subResult = await transcribeBlobDirect(subChunk.blob, language, fileExtension, groqApiKey);
+
+      // Convert to Traditional Chinese if needed
+      let subText = subResult.text;
+      if (isTraditionalChinese && subText) {
+        subText = toTraditionalChinese(subText);
+      }
+
+      // Combine text
+      if (combinedText && subText) {
+        combinedText += " ";
+      }
+      combinedText += subText;
+
+      // Adjust segment timestamps for sub-chunk offset
+      if (subResult.segments) {
+        for (const seg of subResult.segments) {
+          let segText = seg.text;
+          if (isTraditionalChinese && segText) {
+            segText = toTraditionalChinese(segText);
+          }
+          combinedSegments.push({
+            start: seg.start + subChunk.startTime,
+            end: seg.end + subChunk.startTime,
+            text: segText,
+          });
+        }
+      }
+    }
+
+    console.log(`[Server Chunking] Combined ${subChunks.length} sub-chunks, total text length: ${combinedText.length}`);
+
+    return {
+      text: combinedText,
+      segments: combinedSegments,
+    };
   }
 
-  const result = await response.json();
-
-  return {
-    text: result.text,
-    segments: result.segments?.map((seg: { start: number; end: number; text: string }) => ({
-      start: seg.start,
-      end: seg.end,
-      text: seg.text,
-    })),
-  };
+  // File is small enough - transcribe directly
+  return transcribeBlobDirect(normalizedBlob, language, fileExtension, groqApiKey);
 }
 
 // Transcribe all audio chunks and combine results
@@ -743,7 +870,8 @@ async function transcribeAllChunks(
   for (const chunk of sortedChunks) {
     console.log(`Processing chunk ${chunk.index + 1}/${sortedChunks.length}...`);
 
-    const transcription = await transcribeChunk(chunk.url, language);
+    // Pass chunk times for server-side chunking if file is too large
+    const transcription = await transcribeChunk(chunk.url, language, chunk.startTime, chunk.endTime);
 
     // Convert to Traditional Chinese if needed (Whisper often outputs Simplified)
     let chunkText = transcription.text;
