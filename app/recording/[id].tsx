@@ -347,13 +347,29 @@ export default function RecordingDetailScreen() {
       return;
     }
 
-    // CRITICAL: Generate a FRESH signed URL for the audio file
-    // Don't use the old URL from database as it may have expired (24h TTL)
+    // CRITICAL: Get the original URL from database, then refresh it
+    // The stored URL contains the exact file path; refreshing generates a new valid signed URL
     let audioUrl: string;
     try {
-      console.log('[Transcribe] Generating fresh signed URL for audio file...');
-      const { getAudioUrl } = await import('@/services/supabase');
-      audioUrl = await getAudioUrl(user.id, recording.id);
+      // First, get the stored URL from database (contains correct file path)
+      let storedUrl = recording.audioRemoteUrl;
+      if (!storedUrl) {
+        console.log('[Transcribe] No local URL, fetching from database...');
+        const dbRecording = await fetchRecordingById(recording.id);
+        storedUrl = dbRecording?.audio_url;
+      }
+
+      if (!storedUrl) {
+        console.error('[Transcribe] No audio URL found in database');
+        Alert.alert(t.error, '錄音尚未上傳完成，請稍後再試');
+        return;
+      }
+
+      console.log('[Transcribe] Stored URL:', storedUrl.substring(0, 80) + '...');
+
+      // Refresh the signed URL (extracts path from stored URL and creates new signed URL)
+      const { refreshSignedUrl } = await import('@/services/supabase');
+      audioUrl = await refreshSignedUrl(storedUrl);
       console.log('[Transcribe] Fresh audio URL generated:', audioUrl.substring(0, 80) + '...');
     } catch (error) {
       console.error('[Transcribe] Error generating fresh audio URL:', error);

@@ -371,8 +371,51 @@ export async function uploadAudio(
 }
 
 /**
+ * Extract the storage path from a Supabase signed URL
+ * E.g., "https://xxx.supabase.co/storage/v1/object/sign/recordings/user123/rec456.m4a?token=..."
+ *       -> "user123/rec456.m4a"
+ */
+function extractPathFromSignedUrl(signedUrl: string): string | null {
+  try {
+    // The path is after "/recordings/" and before "?" query params
+    const match = signedUrl.match(/\/recordings\/([^?]+)/);
+    if (match && match[1]) {
+      return decodeURIComponent(match[1]);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Regenerate a fresh signed URL from an existing (possibly expired) signed URL
+ * This extracts the actual file path and creates a new signed URL
+ */
+export async function refreshSignedUrl(existingUrl: string): Promise<string> {
+  const path = extractPathFromSignedUrl(existingUrl);
+  if (!path) {
+    throw new Error('Could not extract path from existing URL');
+  }
+
+  console.log(`[refreshSignedUrl] Regenerating signed URL for path: ${path}`);
+
+  const { data, error } = await supabase.storage
+    .from('recordings')
+    .createSignedUrl(path, 60 * 60); // 1 hour expiry
+
+  if (error || !data?.signedUrl) {
+    console.error('[refreshSignedUrl] Error:', error);
+    throw new Error('Failed to create fresh signed URL');
+  }
+
+  return data.signedUrl;
+}
+
+/**
  * Get signed URL for an audio file
  * Tries platform-appropriate extension first, then falls back to the other
+ * NOTE: This guesses the path - prefer refreshSignedUrl() when you have the original URL
  */
 export async function getAudioUrl(userId: string, recordingId: string): Promise<string> {
   // Try platform-appropriate extension first
