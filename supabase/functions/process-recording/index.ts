@@ -644,16 +644,28 @@ async function transcribeChunk(audioUrl: string, language: string): Promise<Tran
   }
 
   // Fetch audio file
-  console.log(`Fetching audio from: ${audioUrl.substring(0, 80)}...`);
+  console.log(`[Audio Fetch] URL: ${audioUrl}`);
+  console.log(`[Audio Fetch] URL length: ${audioUrl.length}`);
   const audioResponse = await fetch(audioUrl);
+  console.log(`[Audio Fetch] Response status: ${audioResponse.status}, ok: ${audioResponse.ok}`);
+  console.log(`[Audio Fetch] Content-Type: ${audioResponse.headers.get('content-type')}`);
+  console.log(`[Audio Fetch] Content-Length: ${audioResponse.headers.get('content-length')}`);
+
   if (!audioResponse.ok) {
     const errorBody = await audioResponse.text().catch(() => "");
-    console.error(`Audio fetch failed: status=${audioResponse.status}, body=${errorBody.substring(0, 200)}`);
+    console.error(`[Audio Fetch] FAILED: status=${audioResponse.status}, body=${errorBody.substring(0, 500)}`);
     throw new Error(`Failed to fetch audio: ${audioResponse.status} - ${errorBody.substring(0, 100)}`);
   }
 
   const audioBlob = await audioResponse.blob();
-  console.log(`Audio fetched successfully: ${(audioBlob.size / 1024 / 1024).toFixed(2)}MB, type: ${audioBlob.type}`);
+  console.log(`[Audio Fetch] Blob size: ${audioBlob.size} bytes (${(audioBlob.size / 1024 / 1024).toFixed(2)}MB)`);
+  console.log(`[Audio Fetch] Blob type: "${audioBlob.type}"`);
+
+  // Check if file is empty BEFORE sending to Groq
+  if (audioBlob.size === 0) {
+    console.error(`[Audio Fetch] ERROR: File is empty! URL may be invalid or file doesn't exist.`);
+    throw new Error(`Audio file is empty - the file may not exist at this URL`);
+  }
 
   // Normalize MIME type for Groq API (convert non-standard types like audio/x-m4a to audio/mp4)
   // Groq rejects non-standard MIME types, so we need to convert them
