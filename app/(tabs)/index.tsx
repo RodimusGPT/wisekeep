@@ -13,7 +13,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import * as FileSystem from 'expo-file-system';
-import { decode as base64Decode } from 'base-64';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
 import { useI18n, useRecording, useAuth, useTheme } from '@/hooks';
@@ -173,12 +172,12 @@ export default function HomeScreen() {
     }
 
     try {
-      // Step 1: Read the audio file and create a Blob
-      // IMPORTANT: On iOS/React Native, fetch(file://) returns empty blobs!
-      // We must use FileSystem.readAsStringAsync with base64 encoding instead
+      // Step 1: Read the audio file
+      // On iOS/React Native, we pass base64 directly to uploadAudio (Blob doesn't work)
+      // On web, we use fetch to get a proper Blob
       console.log('[saveRecordingOnly] Reading audio file from:', audioUri);
 
-      let audioBlob: Blob;
+      let audioData: Blob | string;
 
       if (Platform.OS === 'web') {
         // Web: fetch works correctly with blob URLs
@@ -186,38 +185,19 @@ export default function HomeScreen() {
         if (!response.ok) {
           throw new Error(`Failed to fetch audio file: ${response.status} ${response.statusText}`);
         }
-        audioBlob = await response.blob();
+        audioData = await response.blob();
+        console.log('[saveRecordingOnly] Web blob size:', audioData.size);
       } else {
-        // iOS/Android: Use FileSystem to read the file as base64, then convert to Blob
-        // NOTE: We use 'base-64' package because atob() doesn't exist in React Native!
-        const base64Data = await FileSystem.readAsStringAsync(audioUri, {
+        // iOS/Android: Read file as base64 string - uploadAudio will handle conversion
+        // This avoids the broken Blob polyfill in React Native
+        audioData = await FileSystem.readAsStringAsync(audioUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
+        console.log('[saveRecordingOnly] Native base64 length:', audioData.length);
 
-        console.log('[Audio Upload] Base64 data length:', base64Data.length);
-
-        // Convert base64 to Uint8Array using base-64 package (atob doesn't exist in RN)
-        const binaryString = base64Decode(base64Data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+        if (audioData.length === 0) {
+          throw new Error('Audio file is empty - recording may have failed');
         }
-
-        console.log('[Audio Upload] Decoded bytes length:', bytes.length);
-
-        // Create blob with correct MIME type for iOS (m4a)
-        audioBlob = new Blob([bytes], { type: 'audio/x-m4a' });
-      }
-
-      // Log blob details for debugging
-      console.log('[saveRecordingOnly] Audio blob created:', {
-        size: `${(audioBlob.size / 1024 / 1024).toFixed(2)} MB`,
-        type: audioBlob.type || 'unknown',
-      });
-
-      // Verify blob is not empty
-      if (audioBlob.size === 0) {
-        throw new Error('Audio file is empty - recording may have failed');
       }
 
       // Step 2: Upload with automatic chunking
@@ -225,7 +205,7 @@ export default function HomeScreen() {
       const { chunks, needsChunking } = await uploadAudioChunked(
         user.authUserId,
         recordingId,
-        audioBlob,
+        audioData,
         durationSeconds
       );
       console.log(`Upload complete: ${chunks.length} chunk(s), chunking ${needsChunking ? 'used' : 'not needed'}`);
@@ -288,12 +268,12 @@ export default function HomeScreen() {
     }
 
     try {
-      // Step 1: Read the audio file and create a Blob
-      // IMPORTANT: On iOS/React Native, fetch(file://) returns empty blobs!
-      // We must use FileSystem.readAsStringAsync with base64 encoding instead
+      // Step 1: Read the audio file
+      // On iOS/React Native, we pass base64 directly to uploadAudio (Blob doesn't work)
+      // On web, we use fetch to get a proper Blob
       console.log('[processRecording] Reading audio file from:', audioUri);
 
-      let audioBlob: Blob;
+      let audioData: Blob | string;
 
       if (Platform.OS === 'web') {
         // Web: fetch works correctly with blob URLs
@@ -301,38 +281,19 @@ export default function HomeScreen() {
         if (!response.ok) {
           throw new Error(`Failed to fetch audio file: ${response.status} ${response.statusText}`);
         }
-        audioBlob = await response.blob();
+        audioData = await response.blob();
+        console.log('[processRecording] Web blob size:', audioData.size);
       } else {
-        // iOS/Android: Use FileSystem to read the file as base64, then convert to Blob
-        // NOTE: We use 'base-64' package because atob() doesn't exist in React Native!
-        const base64Data = await FileSystem.readAsStringAsync(audioUri, {
+        // iOS/Android: Read file as base64 string - uploadAudio will handle conversion
+        // This avoids the broken Blob polyfill in React Native
+        audioData = await FileSystem.readAsStringAsync(audioUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
+        console.log('[processRecording] Native base64 length:', audioData.length);
 
-        console.log('[Audio Upload] Base64 data length:', base64Data.length);
-
-        // Convert base64 to Uint8Array using base-64 package (atob doesn't exist in RN)
-        const binaryString = base64Decode(base64Data);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+        if (audioData.length === 0) {
+          throw new Error('Audio file is empty - recording may have failed');
         }
-
-        console.log('[Audio Upload] Decoded bytes length:', bytes.length);
-
-        // Create blob with correct MIME type for iOS (m4a)
-        audioBlob = new Blob([bytes], { type: 'audio/x-m4a' });
-      }
-
-      // Log blob details for debugging
-      console.log('[processRecording] Audio blob created:', {
-        size: `${(audioBlob.size / 1024 / 1024).toFixed(2)} MB`,
-        type: audioBlob.type || 'unknown',
-      });
-
-      // Verify blob is not empty
-      if (audioBlob.size === 0) {
-        throw new Error('Audio file is empty - recording may have failed');
       }
 
       // Step 2: Upload with automatic chunking
@@ -341,7 +302,7 @@ export default function HomeScreen() {
       const { chunks, needsChunking } = await uploadAudioChunked(
         user.authUserId,
         recordingId,
-        audioBlob,
+        audioData,
         durationSeconds
       );
       console.log(`Upload complete: ${chunks.length} chunk(s), chunking ${needsChunking ? 'used' : 'not needed'}`);

@@ -4,6 +4,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { decode } from 'base-64';
 import { chunkAudioBlob, needsChunking, AudioChunk } from '@/utils/audioChunker';
 
 /**
@@ -331,24 +332,51 @@ export async function redeemInviteCode(userId: string, code: string): Promise<{ 
 
 /**
  * Upload audio file to Supabase Storage
+ * Accepts either a Blob (web) or base64 string (React Native)
  */
 export async function uploadAudio(
   userId: string,
   recordingId: string,
-  audioBlob: Blob
+  audioData: Blob | string, // Blob for web, base64 string for native
+  mimeType?: string // Required when passing base64 string
 ): Promise<string> {
-  const { extension, contentType } = getAudioFormat(audioBlob);
+  let extension: string;
+  let contentType: string;
+  let uploadData: Blob | ArrayBuffer;
+
+  if (typeof audioData === 'string') {
+    // React Native: audioData is base64 string
+    // Supabase supports ArrayBuffer uploads which work better than Blob on RN
+    console.log(`[uploadAudio] Uploading base64 data, length: ${audioData.length}`);
+
+    extension = 'm4a'; // iOS recordings are m4a
+    contentType = mimeType || 'audio/mp4';
+
+    // Convert base64 to ArrayBuffer using decode option
+    // Supabase storage accepts { decode: 'base64' } but it's not in the types
+    // Instead, we'll convert to ArrayBuffer manually
+    const binaryString = decode(audioData);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    uploadData = bytes.buffer;
+
+    console.log(`[uploadAudio] Converted to ArrayBuffer, size: ${uploadData.byteLength} bytes`);
+  } else {
+    // Web: audioData is Blob
+    const format = getAudioFormat(audioData);
+    extension = format.extension;
+    contentType = format.contentType;
+    uploadData = audioData;
+    console.log(`[uploadAudio] Blob type: ${audioData.type}, uploading as: ${contentType}`);
+  }
+
   const fileName = `${userId}/${recordingId}.${extension}`;
-
-  console.log(`[uploadAudio] Blob type: ${audioBlob.type}, uploading as: ${contentType}`);
-
-  // Note: On React Native, we cannot normalize the blob type (ArrayBuffer/Blob creation is limited)
-  // The Supabase bucket must have audio/x-m4a in allowed_mime_types for iOS uploads to work
-  // We pass contentType in options which sets the Content-Type header
 
   const { data, error } = await supabase.storage
     .from('recordings')
-    .upload(fileName, audioBlob, {
+    .upload(fileName, uploadData, {
       contentType,
       upsert: true,
     });
@@ -358,7 +386,7 @@ export async function uploadAudio(
     throw error;
   }
 
-  // Get public URL (or signed URL if bucket is private)
+  // Get signed URL
   const { data: urlData } = await supabase.storage
     .from('recordings')
     .createSignedUrl(fileName, 60 * 60 * 24); // 24 hour expiry
@@ -507,22 +535,35 @@ async function uploadChunk(
 
 /**
  * Upload audio with automatic chunking if needed
+ * Accepts Blob (web) or base64 string (React Native)
  * Returns array of chunk URLs with metadata
  */
 export async function uploadAudioChunked(
   userId: string,
   recordingId: string,
-  audioBlob: Blob,
+  audioData: Blob | string, // Blob for web, base64 string for native
   durationSeconds: number,
   onProgress?: (current: number, total: number) => void
 ): Promise<{
   chunks: Array<{ url: string; startTime: number; endTime: number; index: number }>;
   needsChunking: boolean;
 }> {
-  // Check if chunking is needed
-  if (!needsChunking(audioBlob)) {
+  // For base64 strings (React Native), upload directly without chunking
+  // Chunking would require complex audio processing on the client
+  if (typeof audioData === 'string') {
+    console.log(`[uploadAudioChunked] Uploading base64 data (${(audioData.length / 1024 / 1024).toFixed(2)}MB base64)`);
+    const url = await uploadAudio(userId, recordingId, audioData);
+    onProgress?.(1, 1);
+    return {
+      chunks: [{ url, startTime: 0, endTime: durationSeconds, index: 0 }],
+      needsChunking: false,
+    };
+  }
+
+  // For Blob (web), check if chunking is needed
+  if (!needsChunking(audioData)) {
     // Upload as single file
-    const url = await uploadAudio(userId, recordingId, audioBlob);
+    const url = await uploadAudio(userId, recordingId, audioData);
     onProgress?.(1, 1);
     return {
       chunks: [{ url, startTime: 0, endTime: durationSeconds, index: 0 }],
@@ -531,8 +572,8 @@ export async function uploadAudioChunked(
   }
 
   // Split into chunks
-  console.log(`Audio size ${(audioBlob.size / 1024 / 1024).toFixed(1)}MB exceeds limit, chunking...`);
-  const chunkingResult = await chunkAudioBlob(audioBlob, durationSeconds);
+  console.log(`Audio size ${(audioData.size / 1024 / 1024).toFixed(1)}MB exceeds limit, chunking...`);
+  const chunkingResult = await chunkAudioBlob(audioData, durationSeconds);
 
   const uploadedChunks: Array<{ url: string; startTime: number; endTime: number; index: number }> = [];
 
