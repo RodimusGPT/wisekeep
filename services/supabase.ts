@@ -972,6 +972,36 @@ export async function adminSetUserTier(
 }
 
 /**
+ * Get user tier history (admin function)
+ * Returns audit log of all tier changes for a user
+ */
+export interface TierHistoryEntry {
+  id: string;
+  previous_tier: string | null;
+  new_tier: string;
+  changed_by: string;
+  reason: string | null;
+  created_at: string;
+}
+
+export async function adminGetUserTierHistory(
+  deviceId: string,
+  adminKey: string
+): Promise<TierHistoryEntry[]> {
+  const { data, error } = await supabaseAdmin.rpc('admin_get_user_tier_history', {
+    p_device_id: deviceId,
+    p_admin_key: adminKey,
+  });
+
+  if (error) {
+    console.error('Error fetching tier history:', error);
+    return [];
+  }
+
+  return (data || []) as TierHistoryEntry[];
+}
+
+/**
  * Get paginated recordings for a user (admin function)
  * Includes processing times for transcription and summary generation
  */

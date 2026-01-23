@@ -37,8 +37,10 @@ import {
   lookupUserBySupportCode,
   adminSetUserTier,
   adminGetUserRecordings,
+  adminGetUserTierHistory,
   AdminUserInfo,
   AdminRecordingsResponse,
+  TierHistoryEntry,
   supabaseAdmin,  // Use admin-specific client with separate session storage
 } from '@/services/supabase';
 import { isValidSupportCodeFormat } from '@/utils';
@@ -67,6 +69,10 @@ export default function AdminScreen() {
   const [recordingsData, setRecordingsData] = useState<AdminRecordingsResponse | null>(null);
   const [recordingsPage, setRecordingsPage] = useState(1);
   const [isLoadingRecordings, setIsLoadingRecordings] = useState(false);
+
+  // Tier history state
+  const [tierHistory, setTierHistory] = useState<TierHistoryEntry[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   const backgroundColor = isDark ? Colors.backgroundDark : Colors.background;
   const textColor = isDark ? Colors.textDark : Colors.text;
@@ -195,6 +201,26 @@ export default function AdminScreen() {
     }
   };
 
+  // Fetch tier history for a user
+  const fetchTierHistory = async (deviceId: string) => {
+    if (!adminKeyInput.trim()) {
+      // Can't fetch history without admin key
+      setTierHistory([]);
+      return;
+    }
+
+    setIsLoadingHistory(true);
+    try {
+      const history = await adminGetUserTierHistory(deviceId, adminKeyInput.trim());
+      setTierHistory(history);
+    } catch (error) {
+      console.error('Error fetching tier history:', error);
+      setTierHistory([]);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  };
+
   // Search for user by support code
   const handleSearch = async () => {
     if (!supportCodeInput.trim()) {
@@ -209,6 +235,7 @@ export default function AdminScreen() {
 
     setIsSearching(true);
     setFoundUser(null);
+    setTierHistory([]);
 
     try {
       const user = await lookupUserBySupportCode(supportCodeInput.trim());
@@ -219,6 +246,10 @@ export default function AdminScreen() {
         setRecordingsData(null);
         setRecordingsPage(1);
         fetchRecordings(user.id, 1);
+        // Fetch tier history if admin key is set
+        if (adminKeyInput.trim()) {
+          fetchTierHistory(user.device_id);
+        }
       } else {
         Alert.alert('Not Found', 'No user found with that support code');
       }
@@ -254,6 +285,8 @@ export default function AdminScreen() {
         const updatedUser = await lookupUserBySupportCode(foundUser.support_code);
         if (updatedUser) {
           setFoundUser(updatedUser);
+          // Refresh tier history
+          fetchTierHistory(updatedUser.device_id);
         }
       } else {
         Alert.alert('Error', result.message);
@@ -583,6 +616,65 @@ export default function AdminScreen() {
                   </View>
                 </View>
               ))}
+            </View>
+          )}
+
+          {/* Tier History */}
+          {foundUser && (
+            <View style={[styles.section, { backgroundColor: cardBackground }]}>
+              <View style={styles.recordingsSectionHeader}>
+                <Text style={[styles.sectionTitle, { color: textColor, marginBottom: 0 }]}>
+                  Tier History
+                </Text>
+                {!adminKeyInput.trim() && (
+                  <Text style={[styles.recordingsCount, { color: Colors.warning }]}>
+                    Enter admin key to view
+                  </Text>
+                )}
+              </View>
+
+              {isLoadingHistory ? (
+                <ActivityIndicator size="small" color={Colors.primary} style={{ padding: 20 }} />
+              ) : tierHistory.length === 0 && adminKeyInput.trim() ? (
+                <Text style={[styles.emptyText, { color: secondaryColor }]}>
+                  No tier history found
+                </Text>
+              ) : tierHistory.length > 0 ? (
+                <>
+                  {/* Table Header */}
+                  <View style={[styles.tableHeader, { borderBottomColor: Colors.border }]}>
+                    <Text style={[styles.tableHeaderCell, { flex: 2, color: secondaryColor }]}>
+                      Date/Time
+                    </Text>
+                    <Text style={[styles.tableHeaderCell, { flex: 1, color: secondaryColor }]}>
+                      From
+                    </Text>
+                    <Text style={[styles.tableHeaderCell, { flex: 1, color: secondaryColor }]}>
+                      To
+                    </Text>
+                    <Text style={[styles.tableHeaderCell, { flex: 1, color: secondaryColor }]}>
+                      By
+                    </Text>
+                  </View>
+
+                  {tierHistory.map((entry) => (
+                    <View key={entry.id} style={[styles.tableRow, { borderBottomColor: Colors.border }]}>
+                      <Text style={[styles.tableCell, { flex: 2, color: textColor }]}>
+                        {new Date(entry.created_at).toLocaleString()}
+                      </Text>
+                      <Text style={[styles.tableCell, { flex: 1, color: secondaryColor }]}>
+                        {entry.previous_tier || '—'}
+                      </Text>
+                      <Text style={[styles.tableCell, { flex: 1, color: Colors.primary, fontWeight: '600' }]}>
+                        {entry.new_tier}
+                      </Text>
+                      <Text style={[styles.tableCell, { flex: 1, color: secondaryColor }]}>
+                        {entry.changed_by}
+                      </Text>
+                    </View>
+                  ))}
+                </>
+              ) : null}
             </View>
           )}
 
