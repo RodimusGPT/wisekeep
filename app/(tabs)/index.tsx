@@ -191,7 +191,7 @@ export default function HomeScreen() {
         // iOS/Android: Read file as base64 string - uploadAudio will handle conversion
         // This avoids the broken Blob polyfill in React Native
         audioData = await FileSystem.readAsStringAsync(audioUri, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: 'base64', // Use string literal - EncodingType.Base64 may be undefined on iOS
         });
         console.log('[saveRecordingOnly] Native base64 length:', audioData.length);
 
@@ -287,7 +287,7 @@ export default function HomeScreen() {
         // iOS/Android: Read file as base64 string - uploadAudio will handle conversion
         // This avoids the broken Blob polyfill in React Native
         audioData = await FileSystem.readAsStringAsync(audioUri, {
-          encoding: FileSystem.EncodingType.Base64,
+          encoding: 'base64', // Use string literal - EncodingType.Base64 may be undefined on iOS
         });
         console.log('[processRecording] Native base64 length:', audioData.length);
 

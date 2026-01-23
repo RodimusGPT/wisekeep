@@ -20,7 +20,7 @@ export async function uploadAudioFile(
 
     // Read file as base64
     const base64 = await FileSystem.readAsStringAsync(localUri, {
-      encoding: FileSystem.EncodingType.Base64,
+      encoding: 'base64', // Use string literal - EncodingType.Base64 may be undefined on iOS
     });
 
     // Convert to Blob - use standard audio/mp4 MIME type for M4A files
