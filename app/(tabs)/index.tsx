@@ -13,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useFocusEffect } from 'expo-router';
 import * as FileSystem from 'expo-file-system';
+import { decode as base64Decode } from 'base-64';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
 import { useI18n, useRecording, useAuth, useTheme } from '@/hooks';
@@ -188,16 +189,21 @@ export default function HomeScreen() {
         audioBlob = await response.blob();
       } else {
         // iOS/Android: Use FileSystem to read the file as base64, then convert to Blob
+        // NOTE: We use 'base-64' package because atob() doesn't exist in React Native!
         const base64Data = await FileSystem.readAsStringAsync(audioUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        // Convert base64 to Uint8Array
-        const binaryString = atob(base64Data);
+        console.log('[Audio Upload] Base64 data length:', base64Data.length);
+
+        // Convert base64 to Uint8Array using base-64 package (atob doesn't exist in RN)
+        const binaryString = base64Decode(base64Data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
+
+        console.log('[Audio Upload] Decoded bytes length:', bytes.length);
 
         // Create blob with correct MIME type for iOS (m4a)
         audioBlob = new Blob([bytes], { type: 'audio/x-m4a' });
@@ -298,16 +304,21 @@ export default function HomeScreen() {
         audioBlob = await response.blob();
       } else {
         // iOS/Android: Use FileSystem to read the file as base64, then convert to Blob
+        // NOTE: We use 'base-64' package because atob() doesn't exist in React Native!
         const base64Data = await FileSystem.readAsStringAsync(audioUri, {
           encoding: FileSystem.EncodingType.Base64,
         });
 
-        // Convert base64 to Uint8Array
-        const binaryString = atob(base64Data);
+        console.log('[Audio Upload] Base64 data length:', base64Data.length);
+
+        // Convert base64 to Uint8Array using base-64 package (atob doesn't exist in RN)
+        const binaryString = base64Decode(base64Data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           bytes[i] = binaryString.charCodeAt(i);
         }
+
+        console.log('[Audio Upload] Decoded bytes length:', bytes.length);
 
         // Create blob with correct MIME type for iOS (m4a)
         audioBlob = new Blob([bytes], { type: 'audio/x-m4a' });
