@@ -13,6 +13,8 @@ import * as Haptics from 'expo-haptics';
 import { generateUUID } from '@/utils/uuid';
 import { useAppStore } from '@/store';
 import { Recording } from '@/types';
+import { getChunkDuration, allowsMultiPart } from '@/constants/recording-limits';
+import { Alert } from 'react-native';
 
 // Web-specific types
 type WebMediaRecorder = MediaRecorder;
@@ -43,11 +45,76 @@ export function useRecording(): UseRecordingReturn {
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
 
-  const { addRecording, settings, setMicrophonePermission } = useAppStore();
+  // Multi-part recording tracking
+  const currentPartNumber = useRef<number>(1);
+  const parentRecordingId = useRef<string | null>(null);
+  const isAutoChunking = useRef<boolean>(false);
+
+  const { addRecording, settings, setMicrophonePermission, user } = useAppStore();
 
   // Check permission on mount
   useEffect(() => {
     checkPermission();
+  }, []);
+
+  // Auto-chunk or stop recording based on duration and tier
+  useEffect(() => {
+    if (!isRecording || !user) return;
+
+    const userTier = user.tier || 'free';
+    const chunkDuration = getChunkDuration(userTier);
+    const canAutoChunk = allowsMultiPart(userTier);
+
+    // Check if we've reached the chunk duration
+    if (duration >= chunkDuration) {
+      if (canAutoChunk) {
+        // VIP: Auto-save chunk and continue recording
+        console.log(`[useRecording] Auto-chunking: Part ${currentPartNumber.current} complete at ${duration}s`);
+        isAutoChunking.current = true;
+        handleAutoChunk();
+      } else {
+        // Normal users: Hard stop at limit
+        console.log(`[useRecording] Recording limit reached at ${duration}s, stopping...`);
+        stopRecording().then(() => {
+          Alert.alert(
+            '錄音已完成',
+            `錄音已達到 ${Math.floor(chunkDuration / 60)} 分鐘上限。\n\n升級為 VIP 會員即可無限制錄音！`,
+            [{ text: '確定' }]
+          );
+        });
+      }
+    }
+  }, [duration, isRecording, user]);
+
+  // Handle auto-chunking for VIP users
+  const handleAutoChunk = useCallback(async () => {
+    try {
+      console.log(`[useRecording] Saving chunk ${currentPartNumber.current}...`);
+
+      // Stop current recording and save it
+      const recording = await stopRecording();
+
+      if (recording) {
+        // Set parent ID if this is the first part
+        if (currentPartNumber.current === 1) {
+          parentRecordingId.current = recording.id;
+        }
+
+        currentPartNumber.current += 1;
+
+        // Brief pause to ensure clean state
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Continue recording next part
+        console.log(`[useRecording] Starting part ${currentPartNumber.current}...`);
+        await startRecording();
+        isAutoChunking.current = false;
+      }
+    } catch (error) {
+      console.error('[useRecording] Auto-chunk error:', error);
+      isAutoChunking.current = false;
+      Alert.alert('錄音錯誤', '自動分段失敗，請重新開始錄音。');
+    }
   }, []);
 
   const checkPermission = async () => {
@@ -87,6 +154,15 @@ export function useRecording(): UseRecordingReturn {
 
   const startRecording = useCallback(async () => {
     try {
+      // Reset multi-part tracking for new recordings (not auto-chunks)
+      if (!isAutoChunking.current) {
+        currentPartNumber.current = 1;
+        parentRecordingId.current = null;
+        console.log('[useRecording] Starting new recording session');
+      } else {
+        console.log(`[useRecording] Continuing multi-part recording (part ${currentPartNumber.current})`);
+      }
+
       // Check/request permission
       if (!hasPermission) {
         const granted = await requestPermission();
@@ -194,6 +270,10 @@ export function useRecording(): UseRecordingReturn {
 
   const stopRecording = useCallback(async (): Promise<Recording | null> => {
     try {
+      // If this is a manual stop (not auto-chunk), we should mark total parts on the parent recording
+      const isManualStop = !isAutoChunking.current;
+      const isMultiPart = currentPartNumber.current > 1 || parentRecordingId.current;
+
       // Stop duration timer
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
@@ -236,6 +316,10 @@ export function useRecording(): UseRecordingReturn {
                 audioUri: audioUri,
                 status: 'recorded', // Will be uploaded next, not processing yet
                 language: settings.language,
+                // Multi-part metadata
+                partNumber: currentPartNumber.current > 1 || parentRecordingId.current ? currentPartNumber.current : undefined,
+                parentRecordingId: parentRecordingId.current || undefined,
+                totalParts: isManualStop && isMultiPart ? currentPartNumber.current : undefined,
               };
 
               // Add to store
@@ -247,6 +331,12 @@ export function useRecording(): UseRecordingReturn {
               setIsRecording(false);
               setDuration(0);
               setMetering(0);
+
+              // Reset multi-part tracking if manual stop
+              if (isManualStop) {
+                currentPartNumber.current = 1;
+                parentRecordingId.current = null;
+              }
 
               resolve(newRecording);
             });
@@ -364,12 +454,22 @@ export function useRecording(): UseRecordingReturn {
           audioUri: uri, // Use original URI
           status: 'recorded',
           language: settings.language,
+          // Multi-part metadata
+          partNumber: currentPartNumber.current > 1 || parentRecordingId.current ? currentPartNumber.current : undefined,
+          parentRecordingId: parentRecordingId.current || undefined,
+          totalParts: isManualStop && isMultiPart ? currentPartNumber.current : undefined,
         };
 
         addRecording(newRecording);
         setIsRecording(false);
         setDuration(0);
         setMetering(0);
+
+        // Reset multi-part tracking if manual stop
+        if (isManualStop) {
+          currentPartNumber.current = 1;
+          parentRecordingId.current = null;
+        }
 
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         return newRecording;
@@ -383,6 +483,10 @@ export function useRecording(): UseRecordingReturn {
         audioUri: permanentUri,
         status: 'recorded', // Will be uploaded next, not processing yet
         language: settings.language,
+        // Multi-part metadata
+        partNumber: currentPartNumber.current > 1 || parentRecordingId.current ? currentPartNumber.current : undefined,
+        parentRecordingId: parentRecordingId.current || undefined,
+        totalParts: isManualStop && isMultiPart ? currentPartNumber.current : undefined,
       };
 
       console.log('[useRecording] Created recording:', {
@@ -390,6 +494,9 @@ export function useRecording(): UseRecordingReturn {
         effectiveDuration,
         wallClockDuration: finalDuration,
         recorderTime: recorderCurrentTime,
+        partNumber: newRecording.partNumber,
+        parentRecordingId: newRecording.parentRecordingId,
+        totalParts: newRecording.totalParts,
       });
 
       // Add to store
@@ -399,6 +506,12 @@ export function useRecording(): UseRecordingReturn {
       setIsRecording(false);
       setDuration(0);
       setMetering(0);
+
+      // Reset multi-part tracking if manual stop
+      if (isManualStop) {
+        currentPartNumber.current = 1;
+        parentRecordingId.current = null;
+      }
 
       // Haptic feedback
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

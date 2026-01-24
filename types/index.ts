@@ -19,6 +19,11 @@ export interface Recording {
   summary?: string[];
   language?: Language;
   errorMessage?: string;
+
+  // Multi-part recording support (for VIP unlimited recordings)
+  partNumber?: number; // Which part this is (1, 2, 3...) - undefined for single recordings
+  parentRecordingId?: string; // ID of the parent recording if this is a continuation part
+  totalParts?: number; // Total number of parts - only set on completion
 }
 
 export interface AppSettings {

@@ -7,9 +7,10 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 // Groq Whisper has a 25MB file size limit
-// We chunk files larger than 20MB to stay safely under the limit
+// For VIP users with files >25MB, we use Google Cloud Speech-to-Text instead
 const GROQ_MAX_FILE_SIZE_MB = 20;
 const GROQ_MAX_FILE_SIZE_BYTES = GROQ_MAX_FILE_SIZE_MB * 1024 * 1024;
+const GROQ_MAX_DURATION_SECONDS = 25 * 60; // ~25 minutes (safe estimate for 25MB)
 
 // Types
 interface AudioChunk {
@@ -744,6 +745,144 @@ async function transcribeBlobDirect(
   };
 }
 
+// Transcribe using Google Cloud Speech-to-Text async (for VIP users with long recordings)
+// Google Cloud STT async API supports up to 8 hours of audio
+async function transcribeWithGoogleSTT(
+  audioUrl: string,
+  language: string
+): Promise<TranscriptionResult> {
+  const googleApiKey = Deno.env.get("GOOGLE_CLOUD_STT_API_KEY");
+  if (!googleApiKey) {
+    throw new Error("GOOGLE_CLOUD_STT_API_KEY not configured");
+  }
+
+  console.log(`[Google STT] Starting async transcription for: ${audioUrl.substring(0, 80)}...`);
+
+  // For Google Cloud STT async, we can reference the audio directly via URI
+  // The audio must be publicly accessible (our Supabase signed URLs work)
+
+  // Start async transcription job
+  const startResponse = await fetch(
+    `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${googleApiKey}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        config: {
+          encoding: "MP4", // M4A container
+          languageCode: language === "zh-TW" ? "zh-TW" : language,
+          enableAutomaticPunctuation: true,
+          enableWordTimeOffsets: true,
+          model: "latest_long", // Optimized for long audio
+          useEnhanced: true, // Better quality
+        },
+        audio: {
+          uri: audioUrl, // Google will fetch from this URL
+        },
+      }),
+    }
+  );
+
+  if (!startResponse.ok) {
+    const errorText = await startResponse.text();
+    console.error(`[Google STT Error] Failed to start job: ${startResponse.status}, ${errorText}`);
+    throw new Error(`Google STT start error (${startResponse.status}): ${errorText}`);
+  }
+
+  const startResult = await startResponse.json();
+  const operationName = startResult.name;
+
+  if (!operationName) {
+    throw new Error("Google STT did not return operation name");
+  }
+
+  console.log(`[Google STT] Job started: ${operationName}`);
+
+  // Poll for completion
+  let attempts = 0;
+  const maxAttempts = 120; // 10 minutes max (5 second intervals)
+  let completed = false;
+  let transcriptionResult: any = null;
+
+  while (!completed && attempts < maxAttempts) {
+    attempts++;
+
+    // Wait 5 seconds between polls
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    const pollResponse = await fetch(
+      `https://speech.googleapis.com/v1/operations/${operationName}?key=${googleApiKey}`
+    );
+
+    if (!pollResponse.ok) {
+      console.error(`[Google STT] Poll error: ${pollResponse.status}`);
+      continue; // Retry
+    }
+
+    const pollResult = await pollResponse.json();
+
+    if (pollResult.done) {
+      completed = true;
+
+      if (pollResult.error) {
+        throw new Error(`Google STT transcription error: ${JSON.stringify(pollResult.error)}`);
+      }
+
+      transcriptionResult = pollResult.response;
+      console.log(`[Google STT] Job completed after ${attempts * 5}s`);
+    } else {
+      if (attempts % 6 === 0) { // Log every 30 seconds
+        console.log(`[Google STT] Still processing... (${attempts * 5}s elapsed)`);
+      }
+    }
+  }
+
+  if (!completed) {
+    throw new Error("Google STT transcription timeout after 10 minutes");
+  }
+
+  // Convert Google STT format to our format
+  const fullText = transcriptionResult.results
+    ?.map((r: any) => r.alternatives?.[0]?.transcript || "")
+    .join(" ") || "";
+
+  // Convert word timings to segments
+  const segments: TranscriptionSegment[] = [];
+  let currentSegment = { start: 0, end: 0, text: "" };
+
+  transcriptionResult.results?.forEach((r: any) => {
+    const alternative = r.alternatives?.[0];
+    if (alternative?.words) {
+      alternative.words.forEach((word: any) => {
+        const startTime = parseFloat(word.startTime?.replace('s', '') || '0');
+        const endTime = parseFloat(word.endTime?.replace('s', '') || '0');
+
+        // Start new segment if gap > 2 seconds or text gets too long
+        if (currentSegment.text &&
+            (startTime - currentSegment.end > 2 || currentSegment.text.length > 200)) {
+          segments.push({ ...currentSegment });
+          currentSegment = { start: startTime, end: endTime, text: word.word };
+        } else {
+          if (!currentSegment.text) {
+            currentSegment.start = startTime;
+          }
+          currentSegment.end = endTime;
+          currentSegment.text += (currentSegment.text ? " " : "") + word.word;
+        }
+      });
+    }
+  });
+
+  // Push final segment
+  if (currentSegment.text) {
+    segments.push(currentSegment);
+  }
+
+  console.log(`[Google STT] Transcription complete: ${fullText.length} chars, ${segments.length} segments`);
+
+  return { text: fullText, segments };
+}
+
 // Transcribe a single audio chunk using Groq Whisper
 // Handles server-side splitting if file exceeds Groq's size limit
 async function transcribeChunk(
@@ -832,12 +971,25 @@ async function transcribeChunk(
 // Transcribe all audio chunks and combine results
 async function transcribeAllChunks(
   chunks: AudioChunk[],
-  language: string
+  language: string,
+  userTier: string,
+  durationSeconds: number
 ): Promise<{ fullText: string; notes: NoteItem[] }> {
   let fullText = "";
   const allNotes: NoteItem[] = [];
   let noteId = 1;
   const isTraditionalChinese = language === "zh-TW";
+
+  // Determine if we should use Google STT (VIP users with long recordings)
+  const isVIP = userTier === 'vip' || userTier === 'premium';
+  const isLongRecording = durationSeconds > GROQ_MAX_DURATION_SECONDS;
+  const useGoogleSTT = isVIP && isLongRecording;
+
+  if (useGoogleSTT) {
+    console.log(`[Transcription Strategy] VIP user with ${(durationSeconds/60).toFixed(1)} min recording - using Google Cloud STT`);
+  } else {
+    console.log(`[Transcription Strategy] Using Groq Whisper (tier: ${userTier}, duration: ${(durationSeconds/60).toFixed(1)} min)`);
+  }
 
   // Sort chunks by index to ensure correct order
   const sortedChunks = [...chunks].sort((a, b) => a.index - b.index);
@@ -845,8 +997,13 @@ async function transcribeAllChunks(
   for (const chunk of sortedChunks) {
     console.log(`Processing chunk ${chunk.index + 1}/${sortedChunks.length}...`);
 
-    // Pass chunk times for server-side chunking if file is too large
-    const transcription = await transcribeChunk(chunk.url, language, chunk.startTime, chunk.endTime);
+    // Route to appropriate transcription service
+    let transcription: TranscriptionResult;
+    if (useGoogleSTT) {
+      transcription = await transcribeWithGoogleSTT(chunk.url, language);
+    } else {
+      transcription = await transcribeChunk(chunk.url, language, chunk.startTime, chunk.endTime);
+    }
 
     // Convert to Traditional Chinese if needed (Whisper often outputs Simplified)
     let chunkText = transcription.text;
@@ -1028,7 +1185,7 @@ Deno.serve(async (req) => {
     // Step 1: Transcribe all chunks and combine
     currentStep = "transcribe";
     console.log(`[${recording_id}] Starting transcription of ${chunkCount} chunk(s)...`);
-    const { fullText, notes } = await transcribeAllChunks(audio_chunks, language);
+    const { fullText, notes } = await transcribeAllChunks(audio_chunks, language, usage.tier, duration_seconds);
 
     // Calculate actual transcribed duration from segments
     const lastNote = notes[notes.length - 1];

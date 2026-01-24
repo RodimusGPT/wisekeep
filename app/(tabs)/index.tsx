@@ -272,48 +272,83 @@ export default function HomeScreen() {
     }
 
     try {
-      // Step 1: Read the audio file
-      // On iOS/React Native, we pass base64 directly to uploadAudio (Blob doesn't work)
-      // On web, we use fetch to get a proper Blob
-      console.log('[processRecording] Reading audio file from:', audioUri);
+      // Check if this is a multi-part recording
+      const recording = recordings.find(r => r.id === recordingId);
+      const isMultiPart = recording?.parentRecordingId || recording?.partNumber;
 
-      let audioData: Blob | string;
+      // If this is a part of a multi-part recording, find all parts
+      let recordingParts: Recording[] = [recording!];
+      let totalDuration = durationSeconds;
 
-      if (Platform.OS === 'web') {
-        // Web: fetch works correctly with blob URLs
-        const response = await fetch(audioUri);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch audio file: ${response.status} ${response.statusText}`);
-        }
-        audioData = await response.blob();
-        console.log('[processRecording] Web blob size:', audioData.size);
-      } else {
-        // iOS/Android: Use the new expo-file-system File class
-        // File implements Blob interface, so we can use file.base64() to get base64 data
-        const file = new ExpoFile(audioUri);
-        if (!file.exists) {
-          throw new Error('Audio file does not exist');
-        }
-        if (file.size === 0) {
-          throw new Error('Audio file is empty - recording may have failed');
-        }
-        console.log('[processRecording] Native file size:', file.size);
+      if (isMultiPart) {
+        const parentId = recording?.parentRecordingId || recordingId;
+        recordingParts = recordings
+          .filter(r => r.id === parentId || r.parentRecordingId === parentId)
+          .sort((a, b) => (a.partNumber || 0) - (b.partNumber || 0));
 
-        // Read as base64 - uploadAudio will convert to ArrayBuffer
-        audioData = await file.base64();
-        console.log('[processRecording] Native base64 length:', audioData.length);
+        totalDuration = recordingParts.reduce((sum, part) => sum + part.duration, 0);
+
+        console.log(`[processRecording] Multi-part recording detected: ${recordingParts.length} parts, ${(totalDuration / 60).toFixed(1)} min total`);
+      }
+      // Step 1 & 2: Upload all parts (for multi-part) or single recording
+      let allChunks: Array<{ url: string; startTime: number; endTime: number; index: number }> = [];
+      let currentTime = 0;
+
+      for (let i = 0; i < recordingParts.length; i++) {
+        const part = recordingParts[i];
+        console.log(`[processRecording] Processing part ${i + 1}/${recordingParts.length}: ${part.id}`);
+
+        // Read audio file for this part
+        let audioData: Blob | string;
+
+        if (Platform.OS === 'web') {
+          // Web: fetch works correctly with blob URLs
+          const response = await fetch(part.audioUri);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch audio file for part ${i + 1}: ${response.status}`);
+          }
+          audioData = await response.blob();
+          console.log(`[processRecording] Part ${i + 1} web blob size:`, audioData.size);
+        } else {
+          // iOS/Android: Use the new expo-file-system File class
+          const file = new ExpoFile(part.audioUri);
+          if (!file.exists) {
+            throw new Error(`Audio file for part ${i + 1} does not exist`);
+          }
+          if (file.size === 0) {
+            throw new Error(`Audio file for part ${i + 1} is empty`);
+          }
+          console.log(`[processRecording] Part ${i + 1} native file size:`, file.size);
+
+          // Read as base64 - uploadAudio will convert to ArrayBuffer
+          audioData = await file.base64();
+          console.log(`[processRecording] Part ${i + 1} native base64 length:`, audioData.length);
+        }
+
+        // Upload this part
+        console.log(`Uploading part ${i + 1}/${recordingParts.length}...`);
+        const { chunks, needsChunking } = await uploadAudioChunked(
+          user.authUserId,
+          `${recordingId}_part${i + 1}`,
+          audioData,
+          part.duration
+        );
+
+        // Adjust chunk timestamps to account for previous parts
+        const adjustedChunks = chunks.map((chunk, idx) => ({
+          ...chunk,
+          startTime: currentTime + chunk.startTime,
+          endTime: currentTime + chunk.endTime,
+          index: allChunks.length + idx,
+        }));
+
+        allChunks.push(...adjustedChunks);
+        currentTime += part.duration;
+
+        console.log(`Part ${i + 1} upload complete: ${chunks.length} chunk(s), chunking ${needsChunking ? 'used' : 'not needed'}`);
       }
 
-      // Step 2: Upload with automatic chunking
-      // Use authUserId for storage paths (matches Supabase Storage RLS policy using auth.uid())
-      console.log('Uploading audio (with chunking if needed)...');
-      const { chunks, needsChunking } = await uploadAudioChunked(
-        user.authUserId,
-        recordingId,
-        audioData,
-        durationSeconds
-      );
-      console.log(`Upload complete: ${chunks.length} chunk(s), chunking ${needsChunking ? 'used' : 'not needed'}`);
+      console.log(`All parts uploaded: ${allChunks.length} total chunks, ${(totalDuration / 60).toFixed(1)} min total`);
 
       // Step 3: Save recording to database (so Edge Function can update it)
       console.log('Saving recording to database...');
@@ -321,8 +356,8 @@ export default function HomeScreen() {
         id: recordingId,
         user_id: user.id,
         device_id: user.deviceId || 'unknown',
-        duration: durationSeconds,
-        audio_url: chunks[0].url, // Main audio URL (first chunk or single file)
+        duration: totalDuration,
+        audio_url: allChunks[0].url, // Main audio URL (first chunk or single file)
         status: 'processing_notes',
         language: settings.language,
       });
@@ -333,9 +368,9 @@ export default function HomeScreen() {
       const result = await processRecordingApi(
         recordingId,
         user.id,
-        chunks,
+        allChunks,
         settings.language,
-        durationSeconds
+        totalDuration
       );
 
       if (!result.success) {
