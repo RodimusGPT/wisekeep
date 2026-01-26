@@ -5,24 +5,32 @@ import {
   useAudioPlayerStatus,
   setAudioModeAsync,
 } from 'expo-audio';
+import { Recording } from '@/types';
 
 interface UseAudioPlayerReturn {
   isPlaying: boolean;
   isLoaded: boolean;
-  position: number; // Current position in milliseconds
-  duration: number; // Total duration in milliseconds
+  position: number; // Current position in milliseconds across all chunks
+  duration: number; // Total duration in milliseconds across all chunks
   playbackSpeed: 'normal' | 'slow';
   play: () => Promise<void>;
   pause: () => Promise<void>;
   seekTo: (positionMs: number) => Promise<void>;
   setSpeed: (speed: 'normal' | 'slow') => void;
-  loadAudio: (uri: string) => Promise<void>;
+  loadAudio: (recording: Recording) => Promise<void>;
   unloadAudio: () => Promise<void>;
 }
 
 export function useAudioPlayer(): UseAudioPlayerReturn {
   const [audioSource, setAudioSource] = useState<string | null>(null);
   const [playbackSpeed, setPlaybackSpeed] = useState<'normal' | 'slow'>('normal');
+
+  // Multi-chunk support
+  const [audioChunks, setAudioChunks] = useState<string[]>([]);
+  const [currentChunkIndex, setCurrentChunkIndex] = useState(0);
+  const [chunkDurations, setChunkDurations] = useState<number[]>([]);
+  const totalRecordingDuration = useRef<number>(0); // From Recording.duration
+  const wasPlayingBeforeChunkSwitch = useRef<boolean>(false);
 
   // Use expo-audio's player hook with the current source
   const player = useExpoAudioPlayer(audioSource ? { uri: audioSource } : null);
@@ -37,10 +45,86 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     }
   }, [player, isLoaded, playbackSpeed]);
 
-  const loadAudio = useCallback(async (uri: string) => {
+  // Auto-play next chunk when current chunk finishes
+  useEffect(() => {
+    if (!player || !isLoaded || audioChunks.length === 0) return;
+
+    // Check if current chunk has finished playing
+    const currentChunkDuration = status.duration || 0;
+    const currentPosition = status.currentTime || 0;
+    const isPlaying = status.playing || false;
+
+    // If chunk finished and there are more chunks, play next one
+    if (currentPosition >= currentChunkDuration - 0.1 && currentChunkIndex < audioChunks.length - 1 && isPlaying) {
+      console.log(`[AudioPlayer] Chunk ${currentChunkIndex + 1} finished, loading next chunk...`);
+      wasPlayingBeforeChunkSwitch.current = true;
+
+      // Move to next chunk
+      setCurrentChunkIndex(prev => prev + 1);
+    }
+  }, [player, isLoaded, status.currentTime, status.duration, status.playing, currentChunkIndex, audioChunks.length]);
+
+  // Load new chunk when index changes
+  useEffect(() => {
+    if (audioChunks.length === 0) return;
+    if (currentChunkIndex >= audioChunks.length) return;
+
+    const chunkUri = audioChunks[currentChunkIndex];
+    console.log(`[AudioPlayer] Loading chunk ${currentChunkIndex + 1}/${audioChunks.length}:`, chunkUri);
+    setAudioSource(chunkUri);
+  }, [currentChunkIndex, audioChunks]);
+
+  // Resume playing after chunk loads
+  useEffect(() => {
+    if (wasPlayingBeforeChunkSwitch.current && isLoaded && player) {
+      console.log('[AudioPlayer] Resuming playback on new chunk');
+      player.play();
+      wasPlayingBeforeChunkSwitch.current = false;
+    }
+  }, [isLoaded, player]);
+
+  // Store chunk durations when chunks load
+  useEffect(() => {
+    if (isLoaded && status.duration && currentChunkIndex < chunkDurations.length) {
+      // Update duration for current chunk
+      const newDurations = [...chunkDurations];
+      newDurations[currentChunkIndex] = status.duration;
+      setChunkDurations(newDurations);
+    }
+  }, [isLoaded, status.duration, currentChunkIndex]);
+
+  const loadAudio = useCallback(async (recording: Recording) => {
     try {
-      console.log('[AudioPlayer] Loading audio:', uri);
-      setAudioSource(uri);
+      console.log('[AudioPlayer] Loading recording:', recording.id);
+
+      // Prefer remote URL if available (for uploaded recordings)
+      // Otherwise use local chunks/URI
+      let chunks: string[];
+
+      if (recording.audioRemoteUrl) {
+        // Uploaded recording - use remote URL
+        console.log('[AudioPlayer] Using remote URL:', recording.audioRemoteUrl.substring(0, 50) + '...');
+        chunks = [recording.audioRemoteUrl];
+      } else if (recording.audioChunks && recording.audioChunks.length > 0) {
+        // Local multi-chunk recording
+        console.log('[AudioPlayer] Using local chunks:', recording.audioChunks.length);
+        chunks = recording.audioChunks;
+      } else {
+        // Single local recording
+        console.log('[AudioPlayer] Using local URI:', recording.audioUri.substring(0, 50) + '...');
+        chunks = [recording.audioUri];
+      }
+
+      console.log(`[AudioPlayer] Recording has ${chunks.length} chunk(s)`);
+
+      // Store recording duration and chunks
+      totalRecordingDuration.current = recording.duration;
+      setAudioChunks(chunks);
+      setCurrentChunkIndex(0);
+      setChunkDurations(new Array(chunks.length).fill(0));
+
+      // Load first chunk
+      setAudioSource(chunks[0]);
     } catch (error) {
       console.error('[AudioPlayer] Failed to load audio:', error);
       throw error;
@@ -97,20 +181,69 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       console.log('[AudioPlayer] Cannot seek - no player');
       return;
     }
-    if (!isLoaded) {
-      console.log('[AudioPlayer] Cannot seek - audio not loaded yet');
-      return;
-    }
 
     try {
-      const positionSec = positionMs / 1000;
-      console.log('[AudioPlayer] Seeking to:', positionSec, 'seconds');
-      await player.seekTo(positionSec);
-      console.log('[AudioPlayer] Seek complete');
+      const targetPositionSec = positionMs / 1000;
+
+      // For multi-chunk recordings, find which chunk contains the target position
+      if (audioChunks.length > 1) {
+        let accumulatedDuration = 0;
+
+        for (let i = 0; i < audioChunks.length; i++) {
+          const chunkDuration = chunkDurations[i] || (totalRecordingDuration.current / audioChunks.length);
+
+          if (targetPositionSec < accumulatedDuration + chunkDuration) {
+            // Target is in this chunk
+            const positionInChunk = targetPositionSec - accumulatedDuration;
+            console.log(`[AudioPlayer] Seeking to chunk ${i + 1}, position ${positionInChunk.toFixed(1)}s`);
+
+            // Switch to this chunk if needed
+            if (i !== currentChunkIndex) {
+              wasPlayingBeforeChunkSwitch.current = status.playing || false;
+              setCurrentChunkIndex(i);
+
+              // Wait for chunk to load, then seek
+              // The seek will happen in the useEffect that resumes playback
+              setTimeout(async () => {
+                if (player && isLoaded) {
+                  await player.seekTo(positionInChunk);
+                }
+              }, 100);
+            } else {
+              // Same chunk, just seek
+              await player.seekTo(positionInChunk);
+            }
+            return;
+          }
+
+          accumulatedDuration += chunkDuration;
+        }
+
+        // If we got here, target is beyond last chunk - seek to end of last chunk
+        const lastChunkDuration = chunkDurations[audioChunks.length - 1] || 0;
+        if (currentChunkIndex !== audioChunks.length - 1) {
+          setCurrentChunkIndex(audioChunks.length - 1);
+          setTimeout(async () => {
+            if (player && isLoaded) {
+              await player.seekTo(lastChunkDuration);
+            }
+          }, 100);
+        } else {
+          await player.seekTo(lastChunkDuration);
+        }
+      } else {
+        // Single chunk - simple seek
+        if (!isLoaded) {
+          console.log('[AudioPlayer] Cannot seek - audio not loaded yet');
+          return;
+        }
+        console.log('[AudioPlayer] Seeking to:', targetPositionSec, 'seconds');
+        await player.seekTo(targetPositionSec);
+      }
     } catch (error) {
       console.error('[AudioPlayer] Failed to seek:', error);
     }
-  }, [player, isLoaded]);
+  }, [player, isLoaded, audioChunks, chunkDurations, currentChunkIndex, totalRecordingDuration, status.playing]);
 
   const setSpeed = useCallback((speed: 'normal' | 'slow') => {
     setPlaybackSpeed(speed);
@@ -125,16 +258,57 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
         player.pause();
       }
       setAudioSource(null);
+      setAudioChunks([]);
+      setCurrentChunkIndex(0);
+      setChunkDurations([]);
+      totalRecordingDuration.current = 0;
     } catch (error) {
       console.error('[AudioPlayer] Failed to unload audio:', error);
     }
   }, [player]);
 
+  // Calculate position across all chunks
+  const calculateTotalPosition = useCallback(() => {
+    if (audioChunks.length <= 1) {
+      // Single chunk - return current position
+      return (status.currentTime || 0) * 1000;
+    }
+
+    // Multi-chunk: add duration of all previous chunks + current position
+    let totalPosition = 0;
+
+    for (let i = 0; i < currentChunkIndex; i++) {
+      totalPosition += (chunkDurations[i] || 0);
+    }
+
+    totalPosition += (status.currentTime || 0);
+
+    return totalPosition * 1000; // Convert to milliseconds
+  }, [audioChunks.length, currentChunkIndex, chunkDurations, status.currentTime]);
+
+  // Calculate total duration across all chunks
+  const calculateTotalDuration = useCallback(() => {
+    if (audioChunks.length <= 1) {
+      // Single chunk - return current duration
+      return (status.duration || 0) * 1000;
+    }
+
+    // Multi-chunk: Use recording's total duration if available
+    // Otherwise sum all chunk durations
+    if (totalRecordingDuration.current > 0) {
+      return totalRecordingDuration.current * 1000;
+    }
+
+    // Fallback: sum chunk durations
+    const total = chunkDurations.reduce((sum, dur) => sum + dur, 0);
+    return total * 1000; // Convert to milliseconds
+  }, [audioChunks.length, chunkDurations, status.duration]);
+
   return {
     isPlaying: status.playing || false,
     isLoaded,
-    position: (status.currentTime || 0) * 1000, // Convert to milliseconds
-    duration: (status.duration || 0) * 1000, // Convert to milliseconds
+    position: calculateTotalPosition(),
+    duration: calculateTotalDuration(),
     playbackSpeed,
     play,
     pause,

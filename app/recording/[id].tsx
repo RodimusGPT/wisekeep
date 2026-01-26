@@ -122,19 +122,16 @@ export default function RecordingDetailScreen() {
 
   // Load audio when recording changes
   useEffect(() => {
-    // Prefer remote URL if available (for uploaded recordings), otherwise use local URI
-    const audioSource = recording?.audioRemoteUrl || recording?.audioUri;
+    if (!recording) return;
 
-    console.log('[Detail] Audio source:', audioSource ? audioSource.substring(0, 50) + '...' : 'none');
+    console.log('[Detail] Loading recording:', recording.id, 'chunks:', recording.audioChunks?.length || 1);
 
-    if (audioSource) {
-      loadAudio(audioSource);
-    }
+    loadAudio(recording);
 
     return () => {
       unloadAudio();
     };
-  }, [recording?.audioUri, recording?.audioRemoteUrl]);
+  }, [recording?.id, recording?.audioUri, recording?.audioRemoteUrl, recording?.audioChunks]);
 
   // Log when audio loading state changes
   useEffect(() => {
