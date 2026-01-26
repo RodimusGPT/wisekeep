@@ -71,7 +71,11 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   // Load new chunk when index changes
   useEffect(() => {
     if (audioChunks.length === 0) return;
-    if (currentChunkIndex >= audioChunks.length) return;
+    // Bounds checking: ensure index is valid
+    if (currentChunkIndex < 0 || currentChunkIndex >= audioChunks.length) {
+      console.error(`[AudioPlayer] Invalid chunk index: ${currentChunkIndex} (total chunks: ${audioChunks.length})`);
+      return;
+    }
 
     const chunkUri = audioChunks[currentChunkIndex];
     console.log(`[AudioPlayer] Loading chunk ${currentChunkIndex + 1}/${audioChunks.length}:`, chunkUri);
@@ -231,6 +235,17 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 
             // Switch to this chunk if needed
             if (i !== currentChunkIndex) {
+              // Validate target chunk exists
+              if (i < 0 || i >= audioChunks.length) {
+                console.error(`[AudioPlayer] Invalid target chunk index: ${i}`);
+                return;
+              }
+
+              // Warn if overwriting a pending seek (latest seek wins)
+              if (pendingSeekPosition.current !== null && isSwitchingChunks.current) {
+                console.warn(`[AudioPlayer] Overwriting pending seek (${pendingSeekPosition.current.toFixed(1)}s) with new seek (${positionInChunk.toFixed(1)}s)`);
+              }
+
               // Save playback state and position for after chunk loads
               wasPlayingBeforeChunkSwitch.current = status.playing || false;
               pendingSeekPosition.current = positionInChunk;
@@ -253,16 +268,27 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
         }
 
         // If we got here, target is beyond last chunk - seek to end of last chunk
-        const lastChunkDuration = chunkDurations[audioChunks.length - 1] > 0
-          ? chunkDurations[audioChunks.length - 1]
+        const lastChunkIndex = audioChunks.length - 1;
+        if (lastChunkIndex < 0) {
+          console.error('[AudioPlayer] No chunks available for seeking');
+          return;
+        }
+
+        const lastChunkDuration = chunkDurations[lastChunkIndex] > 0
+          ? chunkDurations[lastChunkIndex]
           : (totalRecordingDuration.current / audioChunks.length);
 
-        if (currentChunkIndex !== audioChunks.length - 1) {
+        if (currentChunkIndex !== lastChunkIndex) {
+          // Warn if overwriting a pending seek
+          if (pendingSeekPosition.current !== null && isSwitchingChunks.current) {
+            console.warn(`[AudioPlayer] Overwriting pending seek with seek to end of last chunk`);
+          }
+
           // Switch to last chunk and seek to its end
           wasPlayingBeforeChunkSwitch.current = status.playing || false;
           pendingSeekPosition.current = lastChunkDuration;
           isSwitchingChunks.current = true;
-          setCurrentChunkIndex(audioChunks.length - 1);
+          setCurrentChunkIndex(lastChunkIndex);
         } else {
           // Already on last chunk, just seek
           if (!isLoaded) {

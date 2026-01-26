@@ -477,11 +477,27 @@ export default function HomeScreen() {
             if (dbRecording) {
               console.log('Recording status from DB:', dbRecording.status);
 
-              // Update local state with database values
+              // Validate and sanitize database response
+              const validatedNotes = Array.isArray(dbRecording.notes)
+                ? dbRecording.notes.filter((note): note is NoteLine =>
+                    typeof note === 'object' &&
+                    note !== null &&
+                    'id' in note &&
+                    'timestamp' in note &&
+                    'text' in note &&
+                    typeof note.text === 'string'
+                  )
+                : [];
+
+              const validatedSummary = Array.isArray(dbRecording.summary)
+                ? dbRecording.summary.filter((item): item is string => typeof item === 'string')
+                : [];
+
+              // Update local state with validated database values
               updateRecording(recordingId, {
                 status: dbRecording.status,
-                notes: dbRecording.notes as NoteLine[] || [],
-                summary: dbRecording.summary as string[] || [],
+                notes: validatedNotes,
+                summary: validatedSummary,
               });
 
               // Check if processing is complete
@@ -504,6 +520,15 @@ export default function HomeScreen() {
             } else {
               console.log('Polling timeout - stopping');
               if (!isCancelled) {
+                // Update recording status to show timeout
+                updateRecording(recordingId, {
+                  status: 'error',
+                  notes: [{
+                    id: '1',
+                    timestamp: 0,
+                    text: t.processingTimeoutError || 'Processing timed out after 2 minutes. Please try uploading again.',
+                  }],
+                });
                 setProcessingId(null);
               }
             }
@@ -513,6 +538,15 @@ export default function HomeScreen() {
               const timeoutId = setTimeout(checkStatus, 2000);
               activeTimeouts.push(timeoutId);
             } else if (!isCancelled) {
+              // Update recording status to show polling error
+              updateRecording(recordingId, {
+                status: 'error',
+                notes: [{
+                  id: '1',
+                  timestamp: 0,
+                  text: t.processingTimeoutError || 'Processing timed out after 2 minutes. Please try uploading again.',
+                }],
+              });
               setProcessingId(null);
             }
           }

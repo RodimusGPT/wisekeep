@@ -162,6 +162,7 @@ export interface Translations {
   autoChunkError: string;
   autoChunkErrorPreserved: string;
   pleaseLogin: string;
+  processingTimeoutError: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -327,6 +328,7 @@ export const translations: Record<Language, Translations> = {
     autoChunkError: '自動分段錯誤',
     autoChunkErrorPreserved: '自動分段時發生錯誤，錄音已停止。已保存的部分將被保留。',
     pleaseLogin: '請先登入',
+    processingTimeoutError: '處理超時（2分鐘後無回應）。請稍後再試重新上傳。',
   },
 
   'en': {
@@ -491,5 +493,6 @@ export const translations: Record<Language, Translations> = {
     autoChunkError: 'Auto-chunk Error',
     autoChunkErrorPreserved: 'Auto-chunking failed. Recording stopped. Previously saved portions preserved.',
     pleaseLogin: 'Please log in',
+    processingTimeoutError: 'Processing timed out after 2 minutes. Please try uploading again.',
   },
 };

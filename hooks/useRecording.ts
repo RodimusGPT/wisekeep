@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react';
 import { Platform } from 'react-native';
 import {
   useAudioRecorder,
@@ -46,6 +46,7 @@ export function useRecording(): UseRecordingReturn {
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true); // Track component lifecycle for async callbacks
+  const blobUrlsRef = useRef<Set<string>>(new Set()); // Track blob URLs for cleanup (web only)
 
   // Auto-chunking support (invisible to user - chunks combined into one recording)
   const recordingIdRef = useRef<string | null>(null); // ID for current recording session
@@ -88,8 +89,14 @@ export function useRecording(): UseRecordingReturn {
           );
         }
       } catch (error) {
-        console.error('[useRecording] Failed to check permissions:', error);
-        // Non-critical, continue recording
+        // Permission check errors are non-critical during recording
+        // Could be: permission UI shown (iOS), API error, or other temporary issue
+        // Fail-open: continue recording rather than interrupt user
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        console.warn('[useRecording] Permission check failed (non-critical, continuing):', errorMessage);
+
+        // If error specifically indicates permission issue, we could handle it,
+        // but for now fail-open is safer to avoid false positives
       }
     }, 5000); // Check every 5 seconds
 
@@ -98,28 +105,35 @@ export function useRecording(): UseRecordingReturn {
     };
   }, [isRecording]); // stopRecording is stable, doesn't need to be in deps
 
+  // Memoize chunk duration trigger to avoid re-evaluating effect 100x/sec
+  // Only change when duration crosses into/out of trigger window
+  const isInChunkWindow = useMemo(() => {
+    if (!isRecording || !user) return false;
+    const userTier = user.tier || 'free';
+    const chunkDuration = getChunkDuration(userTier);
+    // Trigger window: ±0.5s around chunk duration
+    return duration >= chunkDuration - 0.5 && duration <= chunkDuration + 0.5;
+  }, [isRecording, user, duration]);
+
   // Auto-chunk or stop recording based on duration and tier
   useEffect(() => {
-    if (!isRecording || !user || isAutoChunking.current || autoChunkPromise.current) return;
+    if (!isRecording || !user || !isInChunkWindow || isAutoChunking.current || autoChunkPromise.current) return;
 
     const userTier = user.tier || 'free';
     const chunkDuration = getChunkDuration(userTier);
     const canAutoChunk = allowsMultiPart(userTier);
 
-    // Check if we've reached the chunk duration
-    // Narrow window to exact duration ±0.5s to prevent multiple triggers
-    if (duration >= chunkDuration - 0.5 && duration <= chunkDuration + 0.5) {
-      // Additional debounce check: prevent triggering if we already chunked in last 10 seconds
-      const now = Date.now();
-      const timeSinceLastChunk = now - lastAutoChunkTime.current;
-      const MIN_CHUNK_INTERVAL = 10000; // 10 seconds minimum between chunks
+    // Additional debounce check: prevent triggering if we already chunked in last 10 seconds
+    const now = Date.now();
+    const timeSinceLastChunk = now - lastAutoChunkTime.current;
+    const MIN_CHUNK_INTERVAL = 10000; // 10 seconds minimum between chunks
 
-      if (timeSinceLastChunk < MIN_CHUNK_INTERVAL) {
-        console.log(`[useRecording] Skipping auto-chunk trigger - only ${(timeSinceLastChunk/1000).toFixed(1)}s since last chunk`);
-        return;
-      }
+    if (timeSinceLastChunk < MIN_CHUNK_INTERVAL) {
+      console.log(`[useRecording] Skipping auto-chunk trigger - only ${(timeSinceLastChunk/1000).toFixed(1)}s since last chunk`);
+      return;
+    }
 
-      if (canAutoChunk) {
+    if (canAutoChunk) {
         // VIP: Auto-save chunk and continue recording (invisible to user)
         console.log(`[useRecording] Auto-chunking triggered at ${duration}s, total chunks: ${audioChunksRef.current.length + 1}`);
         // Set flag AND timestamp BEFORE calling to prevent multiple triggers
@@ -160,7 +174,7 @@ export function useRecording(): UseRecordingReturn {
         });
       }
     }
-  }, [duration, isRecording, user]); // t is captured via tRef
+  }, [isInChunkWindow, isRecording, user, duration]); // duration needed for alert message only
 
   // Handle auto-chunking for VIP users (invisible to user)
   const handleAutoChunk = useCallback(async () => {
@@ -192,6 +206,7 @@ export function useRecording(): UseRecordingReturn {
         }
 
         const chunkUri = URL.createObjectURL(blob);
+        blobUrlsRef.current.add(chunkUri); // Track for cleanup
         audioChunksRef.current.push(chunkUri);
 
         // Clear chunks for next segment
@@ -270,13 +285,26 @@ export function useRecording(): UseRecordingReturn {
         durationIntervalRef.current = null;
       }
 
+      // Cleanup: Revoke any blob URLs created during this recording session (web only)
+      if (Platform.OS === 'web') {
+        blobUrlsRef.current.forEach(url => {
+          try {
+            URL.revokeObjectURL(url);
+            console.log('[useRecording] Revoked blob URL on error:', url);
+          } catch (revokeError) {
+            console.warn('[useRecording] Failed to revoke blob URL:', revokeError);
+          }
+        });
+        blobUrlsRef.current.clear();
+      }
+
       Alert.alert(
         tRef.current.autoChunkError,
         tRef.current.autoChunkErrorPreserved,
         [{ text: tRef.current.confirm }]
       );
 
-      throw error; // Re-throw for caller to handle
+      // Don't re-throw - error is already handled and user notified via alert
     }
   }, []); // t is captured via tRef
 
@@ -481,6 +509,7 @@ export function useRecording(): UseRecordingReturn {
               // Create blob for final chunk
               const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
               const finalChunkUri = URL.createObjectURL(blob);
+              blobUrlsRef.current.add(finalChunkUri); // Track for cleanup
 
               // Add final chunk to array
               const allChunks = [...audioChunksRef.current, finalChunkUri];
@@ -696,16 +725,15 @@ export function useRecording(): UseRecordingReturn {
           });
         }
 
-        // Revoke blob URLs to prevent memory leaks
-        audioChunksRef.current.forEach(uri => {
+        // Revoke all tracked blob URLs to prevent memory leaks
+        blobUrlsRef.current.forEach(url => {
           try {
-            if (uri.startsWith('blob:')) {
-              URL.revokeObjectURL(uri);
-            }
+            URL.revokeObjectURL(url);
           } catch (e) {
             console.warn('[useRecording] Error revoking blob URL:', e);
           }
         });
+        blobUrlsRef.current.clear();
       }
 
       // Native cleanup - check actual recorder state, not component state
@@ -726,6 +754,7 @@ export function useRecording(): UseRecordingReturn {
       webChunksRef.current = [];
       webRecorderRef.current = null;
       webStreamRef.current = null;
+      blobUrlsRef.current.clear();
 
       console.log('[useRecording] Cleanup complete');
     };
