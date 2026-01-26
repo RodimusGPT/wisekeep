@@ -240,6 +240,14 @@ export async function ensureUserProfile(authUserId: string, deviceId: string): P
   // RPC returns an array, get the first (and only) row
   const user = data[0];
 
+  // Validate required fields before casting
+  if (!user?.id || typeof user.id !== 'string') {
+    throw new Error('Invalid user profile: missing or invalid id');
+  }
+  if (!user?.tier || typeof user.tier !== 'string') {
+    throw new Error('Invalid user profile: missing or invalid tier');
+  }
+
   return user as UserProfile;
 }
 

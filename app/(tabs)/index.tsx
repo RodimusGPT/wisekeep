@@ -682,6 +682,14 @@ export default function HomeScreen() {
   // Processing/Saving view
   if (processingId) {
     const processingRecording = recordings.find((r) => r.id === processingId);
+
+    // If recording was deleted while processing, reset processingId
+    if (!processingRecording) {
+      console.warn('[HomeScreen] Processing recording not found, resetting processingId');
+      setProcessingId(null);
+      return null;
+    }
+
     const status = processingRecording?.status;
 
     // Determine what operation is happening
