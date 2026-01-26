@@ -6,7 +6,6 @@ import { useAppStore, UserProfile, UsageInfo, AppConfig } from '@/store';
 import {
   signInAnonymously,
   ensureUserProfile,
-  checkUsage,
   checkComprehensiveUsage,
   getAppConfig,
   redeemInviteCode as redeemCode,
@@ -137,7 +136,7 @@ export function useAuth() {
     if (!user) return;
 
     try {
-      const usageInfo = await checkUsage(user.id);
+      const usageInfo = await checkComprehensiveUsage(user.id);
 
       // Null check before transformation
       if (!usageInfo) {
@@ -147,12 +146,22 @@ export function useAuth() {
 
       const transformedUsage: UsageInfo = {
         tier: usageInfo.tier,
-        allowed: usageInfo.allowed,
-        minutesUsed: usageInfo.minutes_used,
-        minutesLimit: usageInfo.minutes_limit,
-        minutesRemaining: usageInfo.minutes_remaining,
-        periodType: usageInfo.period_type,
-        isUnlimited: usageInfo.is_unlimited,
+        allowed: usageInfo.can_process,
+        minutesUsed: usageInfo.ai_minutes_used,
+        minutesLimit: usageInfo.ai_minutes_limit,
+        minutesRemaining: usageInfo.ai_minutes_remaining,
+        periodType: 'monthly',
+        isUnlimited: usageInfo.ai_minutes_limit === -1,
+        // Comprehensive fields
+        canRecord: usageInfo.can_record,
+        canProcess: usageInfo.can_process,
+        aiMinutesUsed: usageInfo.ai_minutes_used,
+        aiMinutesLimit: usageInfo.ai_minutes_limit,
+        aiMinutesRemaining: usageInfo.ai_minutes_remaining,
+        storageUsed: usageInfo.storage_used,
+        storageLimit: usageInfo.storage_limit,
+        storageRemaining: usageInfo.storage_remaining,
+        periodStart: usageInfo.period_start,
       };
 
       setUsage(transformedUsage);

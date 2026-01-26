@@ -1,7 +1,9 @@
 import { supabase, isSupabaseConfigured } from './supabase';
 import { Recording, NoteLine } from '@/types';
+import { Language } from '@/i18n/translations';
 import { File as ExpoFile } from 'expo-file-system';
 import { decode } from 'base-64';
+import { RecordingStatus, Json } from '@/types/database';
 
 // Upload audio file to Supabase Storage
 export async function uploadAudioFile(
@@ -110,9 +112,9 @@ export async function updateRecordingInSupabase(
     const { error } = await supabase
       .from('recordings')
       .update({
-        status: updates.status,
-        notes: updates.notes,
-        summary: updates.summary,
+        status: updates.status as RecordingStatus | undefined,
+        notes: updates.notes as Json | undefined,
+        summary: updates.summary as Json | undefined,
         error_message: updates.errorMessage,
       })
       .eq('id', recordingId);
@@ -243,10 +245,11 @@ export async function pollRecordingStatus(
       audioUri: data.audio_url,
       audioRemoteUrl: data.audio_url,
       status: data.status,
-      notes: data.notes,
-      summary: data.summary,
-      language: data.language,
-      errorMessage: data.error_message,
+      // Type casts needed: database stores as Json, we validate structure above
+      notes: (data.notes as unknown) as NoteLine[] | undefined,
+      summary: (data.summary as unknown) as string[] | undefined,
+      language: (data.language as Language) || undefined,
+      errorMessage: data.error_message ?? undefined,
     };
   } catch (error) {
     console.error('Failed to poll recording status:', error);

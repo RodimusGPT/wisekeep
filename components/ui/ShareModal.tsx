@@ -18,7 +18,9 @@ import { Recording, getFontSize } from '@/types';
 import { BigButton } from './BigButton';
 
 // Cache for converted MP3 files (persists for browser session)
+// Limited to prevent unbounded memory growth
 const mp3Cache = new Map<string, Blob>();
+const MAX_MP3_CACHE_SIZE = 5;
 
 // Target sample rate for MP3 encoding (lamejs works best with standard rates)
 const TARGET_SAMPLE_RATE = 44100;
@@ -71,11 +73,18 @@ async function convertToMp3(recordingId: string, audioUrl: string): Promise<Blob
 
   // Decode the audio using Web Audio API
   const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+  // Handle browser autoplay policy - resume if suspended
+  if (audioContext.state === 'suspended') {
+    await audioContext.resume();
+  }
+
   const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
   // Get audio data
   const originalSampleRate = audioBuffer.sampleRate;
-  let samples = audioBuffer.getChannelData(0); // Get mono channel
+  // Cast to Float32Array to satisfy TypeScript (getChannelData returns Float32Array<ArrayBufferLike>)
+  let samples: Float32Array = audioBuffer.getChannelData(0) as Float32Array; // Get mono channel
   console.log('[MP3] Original sample rate:', originalSampleRate, 'samples:', samples.length);
 
   // Resample to standard rate if needed (lamejs works best with 44100)
@@ -114,8 +123,10 @@ async function convertToMp3(recordingId: string, audioUrl: string): Promise<Blob
     mp3Data.push(new Uint8Array(finalChunk));
   }
 
-  // Close audio context
-  await audioContext.close();
+  // Close audio context (only if not already closed)
+  if (audioContext.state !== 'closed') {
+    await audioContext.close();
+  }
 
   // Calculate total size
   const totalSize = mp3Data.reduce((sum, chunk) => sum + chunk.length, 0);
@@ -129,7 +140,15 @@ async function convertToMp3(recordingId: string, audioUrl: string): Promise<Blob
   // Create MP3 blob with correct MIME type
   const mp3Blob = new Blob(mp3Data as BlobPart[], { type: 'audio/mpeg' });
 
-  // Cache for future shares
+  // Cache for future shares (with LRU eviction to prevent unbounded growth)
+  if (mp3Cache.size >= MAX_MP3_CACHE_SIZE) {
+    // Remove oldest entry (first key in Map iteration order)
+    const oldestKey = mp3Cache.keys().next().value;
+    if (oldestKey) {
+      mp3Cache.delete(oldestKey);
+      console.log('[MP3] Evicted oldest cache entry:', oldestKey);
+    }
+  }
   mp3Cache.set(recordingId, mp3Blob);
   console.log('[MP3] Cached MP3 for:', recordingId, 'size:', mp3Blob.size);
 

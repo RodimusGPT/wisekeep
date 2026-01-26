@@ -28,7 +28,7 @@ import {
   ConfirmDialog,
   ShareModal,
 } from '@/components/ui';
-import { getFontSize } from '@/types';
+import { getFontSize, Recording, NoteLine } from '@/types';
 import { File } from 'expo-file-system/next';
 import {
   checkComprehensiveUsage,
@@ -221,16 +221,16 @@ export default function RecordingDetailScreen() {
               duration: dbRecording.duration || 0,
               audioUri: dbRecording.audio_url || '',
               audioRemoteUrl: dbRecording.audio_url || undefined,
-              status: dbRecording.status as any,
-              notes: dbRecording.notes as any,
-              summary: dbRecording.summary as any,
+              status: dbRecording.status as Recording['status'],
+              notes: (dbRecording.notes as unknown) as NoteLine[] | undefined,
+              summary: (dbRecording.summary as unknown) as string[] | undefined,
             });
           } else {
             // Otherwise just update it
             updateRecording(id, {
-              status: dbRecording.status as any,
-              notes: dbRecording.notes as any,
-              summary: dbRecording.summary as any,
+              status: dbRecording.status as Recording['status'],
+              notes: (dbRecording.notes as unknown) as NoteLine[] | undefined,
+              summary: (dbRecording.summary as unknown) as string[] | undefined,
               audioRemoteUrl: dbRecording.audio_url || undefined,
             });
           }
@@ -280,9 +280,9 @@ export default function RecordingDetailScreen() {
 
           if (dbRecording) {
             updateRecording(id, {
-              status: dbRecording.status as any,
-              notes: dbRecording.notes as any,
-              summary: dbRecording.summary as any,
+              status: dbRecording.status as Recording['status'],
+              notes: (dbRecording.notes as unknown) as NoteLine[] | undefined,
+              summary: (dbRecording.summary as unknown) as string[] | undefined,
             });
 
             // Stop polling if processing is complete
@@ -430,12 +430,12 @@ export default function RecordingDetailScreen() {
       if (!storedUrl) {
         console.log('[Transcribe] No local URL, fetching from database...');
         const dbRecording = await fetchRecordingById(recording.id);
-        storedUrl = dbRecording?.audio_url;
+        storedUrl = dbRecording?.audio_url ?? undefined;
       }
 
       if (!storedUrl) {
         console.error('[Transcribe] No audio URL found in database');
-        Alert.alert(t.error, '錄音尚未上傳完成，請稍後再試');
+        Alert.alert(t.error, t.recordingNotUploaded);
         return;
       }
 
@@ -447,7 +447,7 @@ export default function RecordingDetailScreen() {
       console.log('[Transcribe] Fresh audio URL generated:', audioUrl.substring(0, 80) + '...');
     } catch (error) {
       console.error('[Transcribe] Error generating fresh audio URL:', error);
-      Alert.alert(t.error, '無法獲取錄音檔案，請稍後再試');
+      Alert.alert(t.error, t.failedToGetAudioFile);
       return;
     }
 
@@ -539,9 +539,9 @@ export default function RecordingDetailScreen() {
           summaryLength: Array.isArray(updatedRecording.summary) ? updatedRecording.summary.length : 0,
         });
         updateRecording(recording.id, {
-          status: updatedRecording.status as any,
-          notes: updatedRecording.notes as any,
-          summary: updatedRecording.summary as any,
+          status: updatedRecording.status as Recording['status'],
+          notes: (updatedRecording.notes as unknown) as NoteLine[] | undefined,
+          summary: (updatedRecording.summary as unknown) as string[] | undefined,
         });
       } else {
         console.log('[Transcription] No updated recording found!');
@@ -597,8 +597,8 @@ export default function RecordingDetailScreen() {
               const updatedRecording = await fetchRecordingById(recording.id);
               if (updatedRecording) {
                 updateRecording(recording.id, {
-                  status: updatedRecording.status as any,
-                  summary: updatedRecording.summary as any,
+                  status: updatedRecording.status as Recording['status'],
+                  summary: (updatedRecording.summary as unknown) as string[] | undefined,
                 });
               }
 

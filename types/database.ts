@@ -6,7 +6,10 @@ export type Json =
   | { [key: string]: Json | undefined }
   | Json[];
 
-export interface Database {
+// Status type for recordings - shared between types
+export type RecordingStatus = 'recording' | 'recorded' | 'processing_notes' | 'notes_ready' | 'processing_summary' | 'ready' | 'error';
+
+export type Database = {
   public: {
     Tables: {
       recordings: {
@@ -15,7 +18,7 @@ export interface Database {
           created_at: string;
           duration: number;
           audio_url: string;
-          status: 'recorded' | 'processing_notes' | 'processing_summary' | 'ready' | 'error';
+          status: RecordingStatus;
           notes: Json | null;
           summary: Json | null;
           language: string | null;
@@ -27,7 +30,7 @@ export interface Database {
           created_at?: string;
           duration: number;
           audio_url: string;
-          status?: 'recorded' | 'processing_notes' | 'processing_summary' | 'ready' | 'error';
+          status?: RecordingStatus;
           notes?: Json | null;
           summary?: Json | null;
           language?: string | null;
@@ -39,13 +42,14 @@ export interface Database {
           created_at?: string;
           duration?: number;
           audio_url?: string;
-          status?: 'recorded' | 'processing_notes' | 'processing_summary' | 'ready' | 'error';
+          status?: RecordingStatus;
           notes?: Json | null;
           summary?: Json | null;
           language?: string | null;
           error_message?: string | null;
           device_id?: string;
         };
+        Relationships: [];
       };
       processing_queue: {
         Row: {
@@ -72,10 +76,25 @@ export interface Database {
           step?: 'transcription' | 'summarization';
           error_message?: string | null;
         };
+        Relationships: [];
       };
     };
-    Views: {};
-    Functions: {};
-    Enums: {};
+    Views: {
+      [_ in never]: never;
+    };
+    Functions: {
+      [_ in never]: never;
+    };
+    Enums: {
+      [_ in never]: never;
+    };
+    CompositeTypes: {
+      [_ in never]: never;
+    };
   };
-}
+};
+
+// Helper type for table row access
+export type Tables<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Row'];
+export type TablesInsert<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Insert'];
+export type TablesUpdate<T extends keyof Database['public']['Tables']> = Database['public']['Tables'][T]['Update'];

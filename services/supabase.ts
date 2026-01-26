@@ -181,6 +181,7 @@ export interface UserProfile {
   id: string;
   tier: 'free' | 'vip' | 'premium';
   device_id: string | null;
+  support_code: string | null;
   invite_code_used: string | null;
   subscription_status: string | null;
   subscription_expires_at: string | null;
@@ -322,8 +323,18 @@ export async function checkComprehensiveUsage(userId: string): Promise<Comprehen
  * Redeem an invite code to get VIP access
  */
 export async function redeemInviteCode(userId: string, code: string): Promise<{ success: boolean; message: string }> {
+  // Basic input validation
+  if (!code || typeof code !== 'string') {
+    return { success: false, message: 'Invalid code format' };
+  }
+
+  const trimmedCode = code.trim();
+  if (trimmedCode.length < 4 || trimmedCode.length > 20) {
+    return { success: false, message: 'Code must be 4-20 characters' };
+  }
+
   const { data, error } = await supabase.functions.invoke('redeem-code', {
-    body: { user_id: userId, code },
+    body: { user_id: userId, code: trimmedCode },
   });
 
   if (error) {

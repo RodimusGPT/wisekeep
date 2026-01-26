@@ -121,6 +121,12 @@ export async function chunkAudioBlob(
     reader.readAsArrayBuffer(audioBlob);
   });
   const totalBytes = arrayBuffer.byteLength;
+
+  // Guard against division by zero
+  if (durationSeconds <= 0) {
+    throw new Error('Invalid duration for audio chunking: duration must be positive');
+  }
+
   const bytesPerSecond = totalBytes / durationSeconds;
 
   let offset = 0;

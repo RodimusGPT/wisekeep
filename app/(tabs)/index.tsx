@@ -416,14 +416,19 @@ export default function HomeScreen() {
     try {
       // Check if this is a multi-part recording
       const recording = recordings.find(r => r.id === recordingId);
-      const isMultiPart = recording?.parentRecordingId || recording?.partNumber;
+      if (!recording) {
+        console.error('[processRecording] Recording not found:', recordingId);
+        setProcessingId(null);
+        return;
+      }
+      const isMultiPart = recording.parentRecordingId || recording.partNumber;
 
       // If this is a part of a multi-part recording, find all parts
-      let recordingParts: Recording[] = [recording!];
+      let recordingParts: Recording[] = [recording];
       let totalDuration = durationSeconds;
 
       if (isMultiPart) {
-        const parentId = recording?.parentRecordingId || recordingId;
+        const parentId = recording.parentRecordingId || recordingId;
         recordingParts = recordings
           .filter(r => r.id === parentId || r.parentRecordingId === parentId)
           .sort((a, b) => (a.partNumber || 0) - (b.partNumber || 0));
@@ -571,12 +576,10 @@ export default function HomeScreen() {
               // Guard against state update after unmount
               if (isCancelled) return;
 
-              // Double-check before state update (defensive programming)
-              if (isCancelled) return;
-
               // Update local state with validated database values
+              // Cast status to Recording type since we validated it above
               updateRecording(recordingId, {
-                status: dbRecording.status,
+                status: dbRecording.status as Recording['status'],
                 notes: validatedNotes,
                 summary: validatedSummary,
               });
@@ -601,8 +604,6 @@ export default function HomeScreen() {
             } else {
               console.log('Polling timeout - stopping');
               if (!isCancelled) {
-                // Double-check before state update
-                if (isCancelled) return;
                 // Update recording status to show timeout
                 updateRecording(recordingId, {
                   status: 'error',

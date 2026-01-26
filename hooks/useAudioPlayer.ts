@@ -137,12 +137,18 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   }, [isLoaded, player]);
 
   // Store chunk durations when chunks load
+  // Uses functional state update to avoid chunkDurations in dependency array (which would cause infinite loops)
   useEffect(() => {
-    if (isLoaded && status.duration && currentChunkIndex < chunkDurations.length) {
-      // Update duration for current chunk
-      const newDurations = [...chunkDurations];
-      newDurations[currentChunkIndex] = status.duration;
-      setChunkDurations(newDurations);
+    if (isLoaded && status.duration) {
+      setChunkDurations(prev => {
+        // Guard: only update if index is valid
+        if (currentChunkIndex >= prev.length) return prev;
+        // Guard: avoid unnecessary update if duration hasn't changed
+        if (prev[currentChunkIndex] === status.duration) return prev;
+        const newDurations = [...prev];
+        newDurations[currentChunkIndex] = status.duration;
+        return newDurations;
+      });
     }
   }, [isLoaded, status.duration, currentChunkIndex]);
 

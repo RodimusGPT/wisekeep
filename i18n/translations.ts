@@ -123,6 +123,8 @@ export interface Translations {
   tryAgain: string;
   storageFull: string;
   storageFullMessage: string;
+  recordingNotUploaded: string;
+  failedToGetAudioFile: string;
 
   // First recording education
   recordingReady: string;
@@ -294,6 +296,8 @@ export const translations: Record<Language, Translations> = {
     tryAgain: '再試一次',
     storageFull: '儲存空間不足',
     storageFullMessage: '請刪除一些舊錄音以繼續錄製新的。',
+    recordingNotUploaded: '錄音尚未上傳完成，請稍後再試。',
+    failedToGetAudioFile: '無法獲取錄音檔案，請稍後再試。',
 
     // First recording education
     recordingReady: '您的錄音已準備好！',
@@ -464,6 +468,8 @@ export const translations: Record<Language, Translations> = {
     tryAgain: 'Try Again',
     storageFull: 'Storage Full',
     storageFullMessage: 'Please delete some old recordings to continue recording new ones.',
+    recordingNotUploaded: 'Recording not yet uploaded. Please try again later.',
+    failedToGetAudioFile: 'Failed to get audio file. Please try again later.',
 
     // First recording education
     recordingReady: 'Your recording is ready!',

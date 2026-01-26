@@ -8,7 +8,7 @@ import {
   setIsAudioActiveAsync,
   setAudioModeAsync,
 } from 'expo-audio';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import { generateUUID } from '@/utils/uuid';
 import { useAppStore } from '@/store';

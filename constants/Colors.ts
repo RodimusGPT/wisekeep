@@ -44,6 +44,7 @@ export const Colors = {
   processing: '#1565C0', // Blue
   ready: '#2E7D32', // Green
   error: '#B71C1C', // Darker red for emphasis
+  warning: '#E65100', // Orange for warnings - high contrast
 
   // Tab bar
   tabActive: '#C62828',
