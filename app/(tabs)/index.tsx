@@ -38,7 +38,7 @@ export default function HomeScreen() {
   const router = useRouter();
 
   const { t } = useI18n();
-  const { settings, recordings, setCurrentRecordingId, updateRecording } = useAppStore();
+  const { settings, recordings, setCurrentRecordingId, updateRecording, deviceId } = useAppStore();
   const { user } = useAuth();
   const textSize = settings.textSize;
 
@@ -58,6 +58,15 @@ export default function HomeScreen() {
   const scrollViewRef = useRef<ScrollView>(null);
   const pollingCleanupRef = useRef<(() => void) | null>(null);
   const spinnerCleanupRef = useRef<(() => void) | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+
+  // Track component mount state
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Cleanup polling and spinner on unmount
   useEffect(() => {
@@ -192,6 +201,7 @@ export default function HomeScreen() {
 
     if (!user) {
       console.error('No user logged in');
+      if (!isMountedRef.current) return;
       updateRecording(recordingId, {
         status: 'ready',
         notes: [{ id: '1', timestamp: 0, text: t.pleaseLogin }],
@@ -201,15 +211,17 @@ export default function HomeScreen() {
       return;
     }
 
+    // Track blob URLs for cleanup after save (declared outside try for access in catch)
+    const blobUrlsToRevoke: string[] = [];
+
     try {
       // Step 1 & 2: Upload all audio chunks with retry logic
       const chunksToUpload = audioChunks && audioChunks.length > 0 ? audioChunks : [audioUri];
       console.log(`[saveRecordingOnly] Uploading ${chunksToUpload.length} chunk(s)...`);
 
       const allUploadedChunks: Array<{ url: string; startTime: number; endTime: number; index: number }> = [];
-      const blobUrlsToRevoke: string[] = []; // Track blob URLs for cleanup after save
       const MAX_RETRIES = 3;
-      const RETRY_DELAY = 1000; // ms
+      const BASE_RETRY_DELAY = 1000; // ms
 
       for (let i = 0; i < chunksToUpload.length; i++) {
         const chunkUri = chunksToUpload[i];
@@ -218,12 +230,14 @@ export default function HomeScreen() {
         let lastError: Error | null = null;
         let uploadSuccess = false;
 
-        // Retry loop for each chunk
+        // Retry loop for each chunk with exponential backoff
         for (let attempt = 0; attempt < MAX_RETRIES && !uploadSuccess; attempt++) {
           try {
             if (attempt > 0) {
-              console.log(`[saveRecordingOnly] Retry attempt ${attempt + 1}/${MAX_RETRIES} for chunk ${i + 1}`);
-              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+              // Exponential backoff: 1s, 2s, 4s...
+              const delay = BASE_RETRY_DELAY * Math.pow(2, attempt - 1);
+              console.log(`[saveRecordingOnly] Retry attempt ${attempt + 1}/${MAX_RETRIES} for chunk ${i + 1} (waiting ${delay}ms)`);
+              await new Promise(resolve => setTimeout(resolve, delay));
             }
 
             // Read audio chunk
@@ -312,12 +326,15 @@ export default function HomeScreen() {
       await saveRecordingToDb({
         id: recordingId,
         user_id: user.id,
-        device_id: user.deviceId || 'unknown',
+        device_id: deviceId || 'unknown',
         duration: durationSeconds,
         audio_url: allUploadedChunks[0].url,
         status: 'recorded',
         language: settings.language,
       });
+
+      // Guard against state updates after unmount
+      if (!isMountedRef.current) return;
 
       // Update local state with remote URL
       updateRecording(recordingId, {
@@ -357,6 +374,9 @@ export default function HomeScreen() {
         });
       }
 
+      // Guard against state updates after unmount
+      if (!isMountedRef.current) return;
+
       updateRecording(recordingId, {
         status: 'ready',
         notes: [{
@@ -377,6 +397,7 @@ export default function HomeScreen() {
 
     if (!user) {
       console.error('No user logged in');
+      if (!isMountedRef.current) return;
       updateRecording(recordingId, {
         status: 'ready',
         notes: [{ id: '1', timestamp: 0, text: t.pleaseLogin }],
@@ -470,7 +491,7 @@ export default function HomeScreen() {
       await saveRecordingToDb({
         id: recordingId,
         user_id: user.id,
-        device_id: user.deviceId || 'unknown',
+        device_id: deviceId || 'unknown',
         duration: totalDuration,
         audio_url: allChunks[0].url, // Main audio URL (first chunk or single file)
         status: 'processing_notes',
@@ -631,6 +652,9 @@ export default function HomeScreen() {
 
     } catch (error) {
       console.error('Processing error:', error);
+
+      // Guard against state updates after unmount
+      if (!isMountedRef.current) return;
 
       // Update status to show error
       updateRecording(recordingId, {

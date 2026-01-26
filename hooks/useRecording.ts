@@ -180,7 +180,6 @@ export function useRecording(): UseRecordingReturn {
           );
         });
       }
-    }
   }, [isInChunkWindow, isRecording, user]); // duration captured in isInChunkWindow memo
 
   // Handle auto-chunking for VIP users (invisible to user)
