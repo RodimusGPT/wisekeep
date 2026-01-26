@@ -457,7 +457,7 @@ export default function HomeScreen() {
       const pollForUpdates = async () => {
         const maxAttempts = 60; // Poll for up to 2 minutes (60 * 2 seconds)
         let attempts = 0;
-        let timeoutId: NodeJS.Timeout | null = null;
+        const activeTimeouts: NodeJS.Timeout[] = []; // Track all timeouts for proper cleanup
         let isCancelled = false;
 
         const checkStatus = async () => {
@@ -499,7 +499,8 @@ export default function HomeScreen() {
 
             // Continue polling if not done and under max attempts
             if (attempts < maxAttempts && !isCancelled) {
-              timeoutId = setTimeout(checkStatus, 2000); // Poll every 2 seconds
+              const timeoutId = setTimeout(checkStatus, 2000);
+              activeTimeouts.push(timeoutId);
             } else {
               console.log('Polling timeout - stopping');
               if (!isCancelled) {
@@ -509,7 +510,8 @@ export default function HomeScreen() {
           } catch (error) {
             console.error('Error polling for updates:', error);
             if (attempts < maxAttempts && !isCancelled) {
-              timeoutId = setTimeout(checkStatus, 2000);
+              const timeoutId = setTimeout(checkStatus, 2000);
+              activeTimeouts.push(timeoutId);
             } else if (!isCancelled) {
               setProcessingId(null);
             }
@@ -517,16 +519,16 @@ export default function HomeScreen() {
         };
 
         // Start polling after a short delay (give Edge Function time to start)
-        timeoutId = setTimeout(checkStatus, 1000);
+        const initialTimeout = setTimeout(checkStatus, 1000);
+        activeTimeouts.push(initialTimeout);
 
         // Return cleanup function
         return () => {
-          console.log('[Polling] Cleanup called, cancelling poll');
+          console.log('[Polling] Cleanup called, cancelling poll and clearing all timeouts');
           isCancelled = true;
-          if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-          }
+          // Clear all pending timeouts
+          activeTimeouts.forEach(id => clearTimeout(id));
+          activeTimeouts.length = 0;
         };
       };
 

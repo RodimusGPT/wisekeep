@@ -689,15 +689,26 @@ export async function processRecording(
         console.error('Could not parse error response:', parseErr);
       }
 
-      const errorMsg = errorDetails?.message || errorDetails?.error || error.message || 'Processing failed';
-      const errorStep = errorDetails?.step;
+      // Safely extract error message with type validation
+      const errorMsg = (
+        (typeof errorDetails?.message === 'string' ? errorDetails.message : null) ||
+        (typeof errorDetails?.error === 'string' ? errorDetails.error : null) ||
+        (typeof error?.message === 'string' ? error.message : null) ||
+        'Processing failed'
+      );
+      const errorStep = typeof errorDetails?.step === 'string' ? errorDetails.step : undefined;
       console.error('Error details:', { errorMsg, errorStep, data });
       return { success: false, error: errorMsg, step: errorStep };
     }
 
     if (data?.error) {
       console.error('Processing returned error:', data.error, data.message);
-      return { success: false, error: data.message || data.error, step: data.step, usage: data.usage };
+      const dataErrorMsg = (
+        (typeof data.message === 'string' ? data.message : null) ||
+        (typeof data.error === 'string' ? data.error : null) ||
+        'Processing failed'
+      );
+      return { success: false, error: dataErrorMsg, step: data.step, usage: data.usage };
     }
 
     return { success: true, usage: data?.usage };

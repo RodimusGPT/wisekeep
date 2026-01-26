@@ -52,9 +52,16 @@ export function useRecording(): UseRecordingReturn {
   const totalDurationRef = useRef<number>(0); // Total duration across all chunks
   const isAutoChunking = useRef<boolean>(false);
   const lastAutoChunkTime = useRef<number>(0); // Timestamp of last auto-chunk to prevent multiple triggers
+  const autoChunkPromise = useRef<Promise<void> | null>(null); // Track ongoing auto-chunk operation
 
   const { addRecording, settings, setMicrophonePermission, user } = useAppStore();
   const { t } = useI18n();
+
+  // Use ref to capture latest t value to avoid stale closures in intervals
+  const tRef = useRef(t);
+  useEffect(() => {
+    tRef.current = t;
+  }, [t]);
 
   // Check permission on mount
   useEffect(() => {
@@ -74,9 +81,9 @@ export function useRecording(): UseRecordingReturn {
           clearInterval(permissionCheckInterval);
           await stopRecording();
           Alert.alert(
-            t.recordingError,
-            t.microphonePermissionMessage,
-            [{ text: t.confirm }]
+            tRef.current.recordingError,
+            tRef.current.microphonePermissionMessage,
+            [{ text: tRef.current.confirm }]
           );
         }
       } catch (error) {
@@ -88,11 +95,11 @@ export function useRecording(): UseRecordingReturn {
     return () => {
       clearInterval(permissionCheckInterval);
     };
-  }, [isRecording, t, stopRecording]);
+  }, [isRecording]); // stopRecording is stable, doesn't need to be in deps
 
   // Auto-chunk or stop recording based on duration and tier
   useEffect(() => {
-    if (!isRecording || !user || isAutoChunking.current) return;
+    if (!isRecording || !user || isAutoChunking.current || autoChunkPromise.current) return;
 
     const userTier = user.tier || 'free';
     const chunkDuration = getChunkDuration(userTier);
@@ -117,32 +124,38 @@ export function useRecording(): UseRecordingReturn {
         // Set flag AND timestamp BEFORE calling to prevent multiple triggers
         isAutoChunking.current = true;
         lastAutoChunkTime.current = now;
-        handleAutoChunk().catch((error) => {
-          console.error('[useRecording] Auto-chunk failed:', error);
-          isAutoChunking.current = false;
-          // Don't reset lastAutoChunkTime - we still want debouncing even on failure
-          // Don't stop recording on auto-chunk failure, just log it
-        });
+
+        // Track the promise to prevent overlapping operations
+        autoChunkPromise.current = handleAutoChunk()
+          .catch((error) => {
+            console.error('[useRecording] Auto-chunk failed:', error);
+            isAutoChunking.current = false;
+            // Don't reset lastAutoChunkTime - we still want debouncing even on failure
+            // Don't stop recording on auto-chunk failure, just log it
+          })
+          .finally(() => {
+            autoChunkPromise.current = null;
+          });
       } else {
         // Normal users: Hard stop at limit
         console.log(`[useRecording] Recording limit reached at ${duration}s, stopping...`);
         stopRecording().then(() => {
           Alert.alert(
-            t.recordingComplete,
-            t.recordingLimitReached.replace('{minutes}', Math.floor(chunkDuration / 60).toString()),
-            [{ text: t.confirm }]
+            tRef.current.recordingComplete,
+            tRef.current.recordingLimitReached.replace('{minutes}', Math.floor(chunkDuration / 60).toString()),
+            [{ text: tRef.current.confirm }]
           );
         }).catch((error) => {
           console.error('[useRecording] Failed to stop recording at limit:', error);
           Alert.alert(
-            t.recordingError,
-            t.recordingStopErrorSaved,
-            [{ text: t.confirm }]
+            tRef.current.recordingError,
+            tRef.current.recordingStopErrorSaved,
+            [{ text: tRef.current.confirm }]
           );
         });
       }
     }
-  }, [duration, isRecording, user]);
+  }, [duration, isRecording, user]); // t is captured via tRef
 
   // Handle auto-chunking for VIP users (invisible to user)
   const handleAutoChunk = useCallback(async () => {
@@ -253,14 +266,14 @@ export function useRecording(): UseRecordingReturn {
       }
 
       Alert.alert(
-        t.autoChunkError,
-        t.autoChunkErrorPreserved,
-        [{ text: t.confirm }]
+        tRef.current.autoChunkError,
+        tRef.current.autoChunkErrorPreserved,
+        [{ text: tRef.current.confirm }]
       );
 
       throw error; // Re-throw for caller to handle
     }
-  }, []);
+  }, []); // t is captured via tRef
 
   const checkPermission = async () => {
     if (Platform.OS === 'web') {
@@ -305,6 +318,7 @@ export function useRecording(): UseRecordingReturn {
         audioChunksRef.current = [];
         totalDurationRef.current = 0;
         lastAutoChunkTime.current = 0;
+        autoChunkPromise.current = null;
         console.log('[useRecording] Starting new recording session:', recordingIdRef.current);
       } else {
         console.log(`[useRecording] Continuing auto-chunked recording: ${recordingIdRef.current}`);
@@ -699,6 +713,7 @@ export function useRecording(): UseRecordingReturn {
       totalDurationRef.current = 0;
       recordingIdRef.current = null;
       isAutoChunking.current = false;
+      autoChunkPromise.current = null;
       webChunksRef.current = [];
       webRecorderRef.current = null;
       webStreamRef.current = null;
