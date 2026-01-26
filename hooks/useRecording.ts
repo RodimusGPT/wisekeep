@@ -282,6 +282,7 @@ export function useRecording(): UseRecordingReturn {
       console.error('[useRecording] Auto-chunk error:', error);
       isAutoChunking.current = false;
       autoChunkPromise.current = null; // Reset promise ref to prevent inconsistency
+      lastAutoChunkTime.current = 0; // Reset debounce timer to allow retry if user restarts
 
       // On error, stop recording completely and preserve what we have
       setIsRecording(false);
@@ -550,15 +551,31 @@ export function useRecording(): UseRecordingReturn {
               webStreamRef.current = null;
             }
 
+            // Capture chunks synchronously BEFORE deferring to prevent race conditions
+            const chunksSnapshot = [...webChunksRef.current];
+            const existingChunksSnapshot = [...audioChunksRef.current];
+
+            // Validate we have audio data
+            if (chunksSnapshot.length === 0) {
+              reject(new Error('No audio data recorded'));
+              return;
+            }
+
             // Defer heavy work to avoid blocking the 'stop' event handler
             queueMicrotask(() => {
-              // Create blob for final chunk
-              const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
+              // Create blob for final chunk from captured snapshot
+              const blob = new Blob(chunksSnapshot, { type: 'audio/webm' });
+
+              // Validate blob has data
+              if (blob.size === 0) {
+                reject(new Error('Created blob has zero size'));
+                return;
+              }
               const finalChunkUri = URL.createObjectURL(blob);
               blobUrlsRef.current.add(finalChunkUri); // Track for cleanup
 
-              // Add final chunk to array
-              const allChunks = [...audioChunksRef.current, finalChunkUri];
+              // Add final chunk to captured snapshot array (not live ref to prevent race)
+              const allChunks = [...existingChunksSnapshot, finalChunkUri];
 
               // Create recording object with all chunks
               const newRecording: Recording = {

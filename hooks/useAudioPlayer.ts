@@ -164,7 +164,16 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       totalRecordingDuration.current = recording.duration;
       setAudioChunks(chunks);
       setCurrentChunkIndex(0);
-      setChunkDurations(new Array(chunks.length).fill(0));
+
+      // Pre-populate chunk durations with estimates to prevent 0 duration during initial load
+      // Actual durations will be refined as each chunk loads via the player status effect
+      if (chunks.length > 1 && recording.duration > 0) {
+        const estimatedChunkDuration = recording.duration / chunks.length;
+        console.log(`[AudioPlayer] Pre-populating chunk durations with estimate: ${estimatedChunkDuration.toFixed(1)}s each`);
+        setChunkDurations(new Array(chunks.length).fill(estimatedChunkDuration));
+      } else {
+        setChunkDurations(new Array(chunks.length).fill(0));
+      }
 
       // Load first chunk
       setAudioSource(chunks[0]);

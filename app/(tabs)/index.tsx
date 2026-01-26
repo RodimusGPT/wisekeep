@@ -220,6 +220,7 @@ export default function HomeScreen() {
       console.log(`[saveRecordingOnly] Uploading ${chunksToUpload.length} chunk(s)...`);
 
       const allUploadedChunks: Array<{ url: string; startTime: number; endTime: number; index: number }> = [];
+      const successfullyUploadedIndices: number[] = []; // Track successful uploads for error recovery info
       const MAX_RETRIES = 3;
       const BASE_RETRY_DELAY = 1000; // ms
 
@@ -294,6 +295,7 @@ export default function HomeScreen() {
 
             // Add all sub-chunks from this part
             allUploadedChunks.push(...chunks);
+            successfullyUploadedIndices.push(i + 1); // Track successful upload (1-indexed for user display)
             console.log(`[saveRecordingOnly] Chunk ${i + 1} uploaded: ${chunks.length} sub-chunk(s)`);
 
             uploadSuccess = true;
@@ -311,9 +313,13 @@ export default function HomeScreen() {
             lastError = error as Error;
             console.error(`[saveRecordingOnly] Chunk ${i + 1} upload attempt ${attempt + 1} failed:`, error);
 
-            // If this was the last attempt, throw the error
+            // If this was the last attempt, throw the error with recovery info
             if (attempt === MAX_RETRIES - 1) {
-              throw new Error(`Failed to upload chunk ${i + 1} after ${MAX_RETRIES} attempts: ${lastError.message}`);
+              const successInfo = successfullyUploadedIndices.length > 0
+                ? ` (Successfully uploaded: chunks ${successfullyUploadedIndices.join(', ')})`
+                : '';
+              console.error(`[saveRecordingOnly] Failed chunk ${i + 1}/${chunksToUpload.length}. Uploaded: ${successfullyUploadedIndices.length} chunks`);
+              throw new Error(`Failed to upload chunk ${i + 1} after ${MAX_RETRIES} attempts: ${lastError.message}${successInfo}`);
             }
           }
         }
