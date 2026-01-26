@@ -107,8 +107,35 @@ export default function HomeScreen() {
           setProcessingId(recording.id);
           setCurrentRecordingId(recording.id);
 
-          // Save recording without processing (new on-demand model)
-          await saveRecordingOnly(recording.id, recording.audioUri, recording.duration);
+          // For multi-part recordings, upload all parts that haven't been uploaded yet
+          if (recording.totalParts && recording.totalParts > 1) {
+            console.log(`[Multi-part] Uploading ${recording.totalParts} parts...`);
+
+            // Find all parts of this multi-part recording
+            const parentId = recording.parentRecordingId || recording.id;
+            const allParts = recordings.filter(
+              r => r.id === parentId || r.parentRecordingId === parentId
+            ).sort((a, b) => (a.partNumber || 0) - (b.partNumber || 0));
+
+            // Upload each part that doesn't have a remote URL (don't navigate for these)
+            for (const part of allParts) {
+              if (!part.audioRemoteUrl) {
+                console.log(`[Multi-part] Uploading part ${part.partNumber}...`);
+                await saveRecordingOnly(part.id, part.audioUri, part.duration, false);
+              }
+            }
+
+            // Upload the final part if it doesn't have a remote URL, and navigate to it
+            if (!recording.audioRemoteUrl) {
+              await saveRecordingOnly(recording.id, recording.audioUri, recording.duration, true);
+            } else {
+              // All parts already uploaded, just navigate to the parent recording
+              router.push(`/recording/${parentId}`);
+            }
+          } else {
+            // Single recording - just upload it and navigate
+            await saveRecordingOnly(recording.id, recording.audioUri, recording.duration, true);
+          }
         }
       } else {
         // Start recording - check storage limit first
@@ -157,7 +184,7 @@ export default function HomeScreen() {
   }, [isRecording, stopRecording, setCurrentRecordingId, user, hasPermission, requestPermission, startRecording, t, router, settings.language]);
 
   // Save recording without AI processing (on-demand model)
-  const saveRecordingOnly = async (recordingId: string, audioUri: string, durationSeconds: number) => {
+  const saveRecordingOnly = async (recordingId: string, audioUri: string, durationSeconds: number, shouldNavigate: boolean = true) => {
     console.log('saveRecordingOnly started for:', recordingId);
 
     if (!user) {
@@ -237,8 +264,10 @@ export default function HomeScreen() {
 
       setProcessingId(null);
 
-      // Navigate to recording detail screen so user can start processing
-      router.push(`/recording/${recordingId}`);
+      // Navigate to recording detail screen so user can start processing (unless this is a multi-part upload)
+      if (shouldNavigate) {
+        router.push(`/recording/${recordingId}`);
+      }
 
     } catch (error) {
       console.error('Save error:', error);

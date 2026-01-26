@@ -59,17 +59,17 @@ export function useRecording(): UseRecordingReturn {
 
   // Auto-chunk or stop recording based on duration and tier
   useEffect(() => {
-    if (!isRecording || !user) return;
+    if (!isRecording || !user || isAutoChunking.current) return;
 
     const userTier = user.tier || 'free';
     const chunkDuration = getChunkDuration(userTier);
     const canAutoChunk = allowsMultiPart(userTier);
 
-    // Check if we've reached the chunk duration
-    if (duration >= chunkDuration) {
+    // Check if we've reached the chunk duration (with small buffer to prevent multiple triggers)
+    if (duration >= chunkDuration && duration < chunkDuration + 2) {
       if (canAutoChunk) {
         // VIP: Auto-save chunk and continue recording
-        console.log(`[useRecording] Auto-chunking: Part ${currentPartNumber.current} complete at ${duration}s`);
+        console.log(`[useRecording] Auto-chunking triggered: Part ${currentPartNumber.current} at ${duration}s`);
         isAutoChunking.current = true;
         handleAutoChunk();
       } else {
@@ -364,10 +364,14 @@ export function useRecording(): UseRecordingReturn {
         wallClockDuration: finalDuration,
         recorderCurrentTime: recorderCurrentTime,
         difference: Math.abs(finalDuration - recorderCurrentTime),
+        isAutoChunk: isAutoChunking.current,
       });
 
-      // Prefer recorder's reported time if available and reasonable
-      const effectiveDuration = recorderCurrentTime > 0 ? Math.floor(recorderCurrentTime) : finalDuration;
+      // For auto-chunks, use wall-clock duration for precision
+      // For manual stops, prefer recorder's reported time if available
+      const effectiveDuration = isAutoChunking.current
+        ? finalDuration
+        : (recorderCurrentTime > 0 ? Math.floor(recorderCurrentTime) : finalDuration);
 
       // Check if recorder is actually recording
       if (!recorder.isRecording) {
