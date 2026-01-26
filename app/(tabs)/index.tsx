@@ -24,6 +24,7 @@ import {
   BigButton,
 } from '@/components/ui';
 import { getFontSize, Recording, NoteLine } from '@/types';
+import { redactUrl } from '@/utils';
 import {
   uploadAudioChunked,
   processRecording as processRecordingApi,
@@ -56,14 +57,20 @@ export default function HomeScreen() {
   const spinAnim = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView>(null);
   const pollingCleanupRef = useRef<(() => void) | null>(null);
+  const spinnerCleanupRef = useRef<(() => void) | null>(null);
 
-  // Cleanup polling on unmount
+  // Cleanup polling and spinner on unmount
   useEffect(() => {
     return () => {
       if (pollingCleanupRef.current) {
         console.log('[HomeScreen] Unmounting - cleaning up active polling');
         pollingCleanupRef.current();
         pollingCleanupRef.current = null;
+      }
+      if (spinnerCleanupRef.current) {
+        console.log('[HomeScreen] Unmounting - cleaning up spinner');
+        spinnerCleanupRef.current();
+        spinnerCleanupRef.current = null;
       }
     };
   }, []);
@@ -95,11 +102,21 @@ export default function HomeScreen() {
         setElapsedTime((prev) => prev + 1);
       }, 1000);
 
-      return () => {
+      // Create cleanup function and store in ref
+      const cleanup = () => {
         spin.stop();
         spinAnim.setValue(0);
         clearInterval(timer);
       };
+      spinnerCleanupRef.current = cleanup;
+
+      return () => {
+        cleanup();
+        spinnerCleanupRef.current = null;
+      };
+    } else {
+      // Clear cleanup ref when not processing
+      spinnerCleanupRef.current = null;
     }
   }, [processingId]);
 
@@ -196,7 +213,7 @@ export default function HomeScreen() {
 
       for (let i = 0; i < chunksToUpload.length; i++) {
         const chunkUri = chunksToUpload[i];
-        console.log(`[saveRecordingOnly] Uploading chunk ${i + 1}/${chunksToUpload.length} from:`, chunkUri);
+        console.log(`[saveRecordingOnly] Uploading chunk ${i + 1}/${chunksToUpload.length} from:`, redactUrl(chunkUri));
 
         let lastError: Error | null = null;
         let uploadSuccess = false;

@@ -55,6 +55,7 @@ export function useRecording(): UseRecordingReturn {
   const isAutoChunking = useRef<boolean>(false);
   const lastAutoChunkTime = useRef<number>(0); // Timestamp of last auto-chunk to prevent multiple triggers
   const autoChunkPromise = useRef<Promise<void> | null>(null); // Track ongoing auto-chunk operation
+  const isStoppingRef = useRef<boolean>(false); // Prevent concurrent stopRecording calls
 
   const { addRecording, settings, setMicrophonePermission, user } = useAppStore();
   const { t } = useI18n();
@@ -302,6 +303,26 @@ export function useRecording(): UseRecordingReturn {
           }
         });
         blobUrlsRef.current.clear();
+      } else {
+        // Native: Clean up orphaned chunk files to prevent storage waste
+        // Delete chunk files that may have been created but recording failed
+        const chunksToCleanup = [...audioChunksRef.current];
+        if (chunksToCleanup.length > 0) {
+          console.log(`[useRecording] Cleaning up ${chunksToCleanup.length} orphaned chunk file(s)...`);
+          for (const chunkPath of chunksToCleanup) {
+            try {
+              const fileInfo = await FileSystem.getInfoAsync(chunkPath);
+              if (fileInfo.exists) {
+                await FileSystem.deleteAsync(chunkPath, { idempotent: true });
+                console.log('[useRecording] Deleted orphaned chunk:', chunkPath);
+              }
+            } catch (deleteError) {
+              console.warn('[useRecording] Failed to delete orphaned chunk:', chunkPath, deleteError);
+              // Continue cleanup even if one file fails
+            }
+          }
+        }
+        audioChunksRef.current = []; // Clear the array after cleanup
       }
 
       Alert.alert(
@@ -469,6 +490,13 @@ export function useRecording(): UseRecordingReturn {
   }, [hasPermission]);
 
   const stopRecording = useCallback(async (): Promise<Recording | null> => {
+    // Guard against concurrent stopRecording calls
+    if (isStoppingRef.current) {
+      console.warn('[useRecording] stopRecording already in progress, ignoring concurrent call');
+      return null;
+    }
+    isStoppingRef.current = true;
+
     try {
       // Stop duration timer
       if (durationIntervalRef.current) {
@@ -706,6 +734,9 @@ export function useRecording(): UseRecordingReturn {
       isAutoChunking.current = false;
       autoChunkPromise.current = null;
       throw error;
+    } finally {
+      // Always reset the stopping flag, even if there was an error
+      isStoppingRef.current = false;
     }
   }, [addRecording, settings.language]);
 

@@ -6,6 +6,7 @@ import {
   setAudioModeAsync,
 } from 'expo-audio';
 import { Recording } from '@/types';
+import { redactUrl } from '@/utils';
 
 interface UseAudioPlayerReturn {
   isPlaying: boolean;
@@ -78,7 +79,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     }
 
     const chunkUri = audioChunks[currentChunkIndex];
-    console.log(`[AudioPlayer] Loading chunk ${currentChunkIndex + 1}/${audioChunks.length}:`, chunkUri);
+    console.log(`[AudioPlayer] Loading chunk ${currentChunkIndex + 1}/${audioChunks.length}:`, redactUrl(chunkUri));
     setAudioSource(chunkUri);
   }, [currentChunkIndex, audioChunks]);
 
@@ -136,7 +137,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 
       if (recording.audioRemoteUrl) {
         // Uploaded recording - use remote URL
-        console.log('[AudioPlayer] Using remote URL:', recording.audioRemoteUrl.substring(0, 50) + '...');
+        console.log('[AudioPlayer] Using remote URL:', redactUrl(recording.audioRemoteUrl));
         chunks = [recording.audioRemoteUrl];
       } else if (recording.audioChunks && recording.audioChunks.length > 0) {
         // Local multi-chunk recording
@@ -144,7 +145,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
         chunks = recording.audioChunks;
       } else {
         // Single local recording
-        console.log('[AudioPlayer] Using local URI:', recording.audioUri.substring(0, 50) + '...');
+        console.log('[AudioPlayer] Using local URI:', redactUrl(recording.audioUri));
         chunks = [recording.audioUri];
       }
 
@@ -336,38 +337,52 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   // Calculate position across all chunks
   const calculateTotalPosition = useCallback(() => {
     if (audioChunks.length <= 1) {
-      // Single chunk - return current position
-      return (status.currentTime || 0) * 1000;
+      // Single chunk - return current position with bounds checking
+      const pos = (status.currentTime || 0) * 1000;
+      return Number.isNaN(pos) ? 0 : Math.max(0, pos);
     }
 
     // Multi-chunk: add duration of all previous chunks + current position
     let totalPosition = 0;
 
     for (let i = 0; i < currentChunkIndex; i++) {
-      totalPosition += (chunkDurations[i] || 0);
+      const chunkDur = chunkDurations[i] || 0;
+      if (Number.isNaN(chunkDur)) continue;
+      totalPosition += chunkDur;
     }
 
-    totalPosition += (status.currentTime || 0);
+    const currentPos = status.currentTime || 0;
+    if (!Number.isNaN(currentPos)) {
+      totalPosition += currentPos;
+    }
 
-    return totalPosition * 1000; // Convert to milliseconds
+    // Bounds check and convert to milliseconds
+    const result = totalPosition * 1000;
+    return Number.isNaN(result) ? 0 : Math.max(0, Math.min(result, Number.MAX_SAFE_INTEGER));
   }, [audioChunks.length, currentChunkIndex, chunkDurations, status.currentTime]);
 
   // Calculate total duration across all chunks
   const calculateTotalDuration = useCallback(() => {
     if (audioChunks.length <= 1) {
-      // Single chunk - return current duration
-      return (status.duration || 0) * 1000;
+      // Single chunk - return current duration with bounds checking
+      const dur = (status.duration || 0) * 1000;
+      return Number.isNaN(dur) ? 0 : Math.max(0, dur);
     }
 
     // Multi-chunk: Use recording's total duration if available
     // Otherwise sum all chunk durations
-    if (totalRecordingDuration.current > 0) {
-      return totalRecordingDuration.current * 1000;
+    if (totalRecordingDuration.current > 0 && !Number.isNaN(totalRecordingDuration.current)) {
+      const dur = totalRecordingDuration.current * 1000;
+      return Math.max(0, Math.min(dur, Number.MAX_SAFE_INTEGER));
     }
 
-    // Fallback: sum chunk durations
-    const total = chunkDurations.reduce((sum, dur) => sum + dur, 0);
-    return total * 1000; // Convert to milliseconds
+    // Fallback: sum chunk durations with validation
+    const total = chunkDurations.reduce((sum, dur) => {
+      if (Number.isNaN(dur)) return sum;
+      return sum + dur;
+    }, 0);
+    const result = total * 1000;
+    return Number.isNaN(result) ? 0 : Math.max(0, Math.min(result, Number.MAX_SAFE_INTEGER));
   }, [audioChunks.length, chunkDurations, status.duration]);
 
   // Cleanup on unmount

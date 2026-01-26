@@ -197,6 +197,45 @@ export async function pollRecordingStatus(
       throw error;
     }
 
+    // Runtime type validation for database response
+    if (!data) {
+      throw new Error('No data returned from database');
+    }
+
+    // Validate required fields
+    if (typeof data.id !== 'string' || !data.id) {
+      throw new Error('Invalid or missing id in database response');
+    }
+    if (typeof data.created_at !== 'string' || !data.created_at) {
+      throw new Error('Invalid or missing created_at in database response');
+    }
+    if (typeof data.duration !== 'number') {
+      throw new Error('Invalid or missing duration in database response');
+    }
+    if (typeof data.audio_url !== 'string' || !data.audio_url) {
+      throw new Error('Invalid or missing audio_url in database response');
+    }
+    if (typeof data.status !== 'string' || !data.status) {
+      throw new Error('Invalid or missing status in database response');
+    }
+    if (typeof data.language !== 'string' || !data.language) {
+      throw new Error('Invalid or missing language in database response');
+    }
+
+    // Validate optional fields when present
+    if (data.notes !== null && data.notes !== undefined && !Array.isArray(data.notes)) {
+      console.warn('Invalid notes type in database response, expected array:', typeof data.notes);
+      data.notes = null; // Sanitize invalid data
+    }
+    if (data.summary !== null && data.summary !== undefined && !Array.isArray(data.summary)) {
+      console.warn('Invalid summary type in database response, expected array:', typeof data.summary);
+      data.summary = null; // Sanitize invalid data
+    }
+    if (data.error_message !== null && data.error_message !== undefined && typeof data.error_message !== 'string') {
+      console.warn('Invalid error_message type in database response, expected string:', typeof data.error_message);
+      data.error_message = null; // Sanitize invalid data
+    }
+
     return {
       id: data.id,
       createdAt: data.created_at,

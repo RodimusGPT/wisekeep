@@ -71,47 +71,57 @@ export function useAuth() {
       ]);
       console.log('[Auth] Usage loaded:', usageInfo?.tier);
 
-      // Transform comprehensive usage info
-      const transformedUsage: UsageInfo = {
-        tier: usageInfo.tier,
-        allowed: usageInfo.can_process, // Map can_process to allowed for backwards compatibility
-        minutesUsed: usageInfo.ai_minutes_used, // AI processing minutes (new model)
-        minutesLimit: usageInfo.ai_minutes_limit,
-        minutesRemaining: usageInfo.ai_minutes_remaining,
-        periodType: 'monthly',
-        isUnlimited: usageInfo.ai_minutes_limit === -1,
-        // New comprehensive fields
-        canRecord: usageInfo.can_record,
-        canProcess: usageInfo.can_process,
-        aiMinutesUsed: usageInfo.ai_minutes_used,
-        aiMinutesLimit: usageInfo.ai_minutes_limit,
-        aiMinutesRemaining: usageInfo.ai_minutes_remaining,
-        storageUsed: usageInfo.storage_used,
-        storageLimit: usageInfo.storage_limit,
-        storageRemaining: usageInfo.storage_remaining,
-        periodStart: usageInfo.period_start,
-      };
+      // Transform comprehensive usage info (with null check)
+      if (usageInfo) {
+        const transformedUsage: UsageInfo = {
+          tier: usageInfo.tier,
+          allowed: usageInfo.can_process, // Map can_process to allowed for backwards compatibility
+          minutesUsed: usageInfo.ai_minutes_used, // AI processing minutes (new model)
+          minutesLimit: usageInfo.ai_minutes_limit,
+          minutesRemaining: usageInfo.ai_minutes_remaining,
+          periodType: 'monthly',
+          isUnlimited: usageInfo.ai_minutes_limit === -1,
+          // New comprehensive fields
+          canRecord: usageInfo.can_record,
+          canProcess: usageInfo.can_process,
+          aiMinutesUsed: usageInfo.ai_minutes_used,
+          aiMinutesLimit: usageInfo.ai_minutes_limit,
+          aiMinutesRemaining: usageInfo.ai_minutes_remaining,
+          storageUsed: usageInfo.storage_used,
+          storageLimit: usageInfo.storage_limit,
+          storageRemaining: usageInfo.storage_remaining,
+          periodStart: usageInfo.period_start,
+        };
 
-      setUsage(transformedUsage);
+        setUsage(transformedUsage);
+      } else {
+        console.warn('[Auth] Failed to load usage info, skipping usage setup');
+        setUsage(null);
+      }
 
-      // Transform app config
-      const transformedConfig: AppConfig = {
-        freeTier: {
-          minutes: config.free_tier.minutes,
-          period: config.free_tier.period,
-        },
-        premium: {
-          monthlyPriceTwd: config.premium.monthly_price_twd,
-          yearlyPriceTwd: config.premium.yearly_price_twd,
-          yearlySavingsTwd: config.premium.yearly_savings_twd,
-        },
-        limits: {
-          maxRecordingDurationMinutes: config.limits.max_recording_duration_minutes,
-          maxAudioFileSizeMb: config.limits.max_audio_file_size_mb,
-        },
-      };
+      // Transform app config (with null check)
+      if (config) {
+        const transformedConfig: AppConfig = {
+          freeTier: {
+            minutes: config.free_tier.minutes,
+            period: config.free_tier.period,
+          },
+          premium: {
+            monthlyPriceTwd: config.premium.monthly_price_twd,
+            yearlyPriceTwd: config.premium.yearly_price_twd,
+            yearlySavingsTwd: config.premium.yearly_savings_twd,
+          },
+          limits: {
+            maxRecordingDurationMinutes: config.limits.max_recording_duration_minutes,
+            maxAudioFileSizeMb: config.limits.max_audio_file_size_mb,
+          },
+        };
 
-      setAppConfig(transformedConfig);
+        setAppConfig(transformedConfig);
+      } else {
+        console.warn('[Auth] Failed to load app config, skipping config setup');
+        setAppConfig(null);
+      }
       console.log('[Auth] Init complete!');
 
     } catch (error) {
@@ -128,6 +138,12 @@ export function useAuth() {
 
     try {
       const usageInfo = await checkUsage(user.id);
+
+      // Null check before transformation
+      if (!usageInfo) {
+        console.warn('[Auth] Failed to refresh usage info, no data returned');
+        return;
+      }
 
       const transformedUsage: UsageInfo = {
         tier: usageInfo.tier,
