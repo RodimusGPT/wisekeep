@@ -125,7 +125,7 @@ export default function HomeScreen() {
       } else {
         // Start recording - check storage limit first
         if (!user) {
-          Alert.alert(t.error, '請先登入');
+          Alert.alert(t.error, t.pleaseLogin);
           return;
         }
 
@@ -177,7 +177,7 @@ export default function HomeScreen() {
       console.error('No user logged in');
       updateRecording(recordingId, {
         status: 'ready',
-        notes: [{ id: '1', timestamp: 0, text: '請先登入' }],
+        notes: [{ id: '1', timestamp: 0, text: t.pleaseLogin }],
         summary: ['尚未登入，請稍後重試。'],
       });
       setProcessingId(null);
@@ -266,6 +266,17 @@ export default function HomeScreen() {
 
             uploadSuccess = true;
 
+            // Cleanup: Revoke blob URL immediately after successful upload (web only)
+            if (Platform.OS === 'web' && chunkUri.startsWith('blob:')) {
+              try {
+                URL.revokeObjectURL(chunkUri);
+                console.log(`[saveRecordingOnly] Revoked blob URL for chunk ${i + 1}`);
+              } catch (revokeError) {
+                console.warn(`[saveRecordingOnly] Failed to revoke blob URL for chunk ${i + 1}:`, revokeError);
+                // Non-critical, continue
+              }
+            }
+
           } catch (error) {
             lastError = error as Error;
             console.error(`[saveRecordingOnly] Chunk ${i + 1} upload attempt ${attempt + 1} failed:`, error);
@@ -327,7 +338,7 @@ export default function HomeScreen() {
       console.error('No user logged in');
       updateRecording(recordingId, {
         status: 'ready',
-        notes: [{ id: '1', timestamp: 0, text: '請先登入' }],
+        notes: [{ id: '1', timestamp: 0, text: t.pleaseLogin }],
         summary: ['尚未登入，請稍後重試。'],
       });
       setProcessingId(null);

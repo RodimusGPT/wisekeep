@@ -151,6 +151,17 @@ export interface Translations {
   // Support
   supportCode: string;
   codeCopied: string;
+
+  // Recording errors and limits
+  recordingComplete: string;
+  recordingLimitReached: string;
+  upgradeToVIP: string;
+  recordingError: string;
+  recordingStopError: string;
+  recordingStopErrorSaved: string;
+  autoChunkError: string;
+  autoChunkErrorPreserved: string;
+  pleaseLogin: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -305,6 +316,17 @@ export const translations: Record<Language, Translations> = {
     // Support
     supportCode: '支援代碼',
     codeCopied: '代碼已複製',
+
+    // Recording errors and limits
+    recordingComplete: '錄音已完成',
+    recordingLimitReached: '錄音已達到 {minutes} 分鐘上限。\n\n升級為 VIP 會員即可無限制錄音！',
+    upgradeToVIP: '升級為 VIP 會員即可無限制錄音！',
+    recordingError: '錄音錯誤',
+    recordingStopError: '停止錄音時發生錯誤',
+    recordingStopErrorSaved: '停止錄音時發生錯誤，但錄音數據已保存。',
+    autoChunkError: '自動分段錯誤',
+    autoChunkErrorPreserved: '自動分段時發生錯誤，錄音已停止。已保存的部分將被保留。',
+    pleaseLogin: '請先登入',
   },
 
   'en': {
@@ -458,5 +480,16 @@ export const translations: Record<Language, Translations> = {
     // Support
     supportCode: 'Support Code',
     codeCopied: 'Code copied',
+
+    // Recording errors and limits
+    recordingComplete: 'Recording Complete',
+    recordingLimitReached: 'Recording has reached {minutes} minute limit.\n\nUpgrade to VIP for unlimited recording!',
+    upgradeToVIP: 'Upgrade to VIP for unlimited recording!',
+    recordingError: 'Recording Error',
+    recordingStopError: 'Error stopping recording',
+    recordingStopErrorSaved: 'Error stopping recording, but data was saved.',
+    autoChunkError: 'Auto-chunk Error',
+    autoChunkErrorPreserved: 'Auto-chunking failed. Recording stopped. Previously saved portions preserved.',
+    pleaseLogin: 'Please log in',
   },
 };

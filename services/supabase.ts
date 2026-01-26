@@ -672,10 +672,17 @@ export async function processRecording(
       // The error.context property contains the Response object
       let errorDetails: { message?: string; step?: string; error?: string } | null = null;
       try {
-        // FunctionsHttpError has a context property with the response
-        const context = (error as any).context;
-        if (context && typeof context.json === 'function') {
-          errorDetails = await context.json();
+        // Type guard for FunctionsHttpError with context
+        if (
+          error &&
+          typeof error === 'object' &&
+          'context' in error &&
+          error.context &&
+          typeof error.context === 'object' &&
+          'json' in error.context &&
+          typeof error.context.json === 'function'
+        ) {
+          errorDetails = await error.context.json();
           console.error('Error response body:', errorDetails);
         }
       } catch (parseErr) {

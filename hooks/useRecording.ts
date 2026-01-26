@@ -15,6 +15,7 @@ import { useAppStore } from '@/store';
 import { Recording } from '@/types';
 import { getChunkDuration, allowsMultiPart } from '@/constants/recording-limits';
 import { Alert } from 'react-native';
+import { useI18n } from '@/hooks';
 
 // Web-specific types
 type WebMediaRecorder = MediaRecorder;
@@ -50,13 +51,44 @@ export function useRecording(): UseRecordingReturn {
   const audioChunksRef = useRef<string[]>([]); // Accumulated chunk file paths
   const totalDurationRef = useRef<number>(0); // Total duration across all chunks
   const isAutoChunking = useRef<boolean>(false);
+  const lastAutoChunkTime = useRef<number>(0); // Timestamp of last auto-chunk to prevent multiple triggers
 
   const { addRecording, settings, setMicrophonePermission, user } = useAppStore();
+  const { t } = useI18n();
 
   // Check permission on mount
   useEffect(() => {
     checkPermission();
   }, []);
+
+  // Periodically check permissions during recording to detect mid-recording revocation
+  useEffect(() => {
+    if (!isRecording) return;
+
+    const permissionCheckInterval = setInterval(async () => {
+      try {
+        const { granted } = await getRecordingPermissionsAsync();
+        if (!granted) {
+          console.warn('[useRecording] Permission revoked mid-recording');
+          // Stop recording gracefully
+          clearInterval(permissionCheckInterval);
+          await stopRecording();
+          Alert.alert(
+            t.recordingError,
+            t.microphonePermissionMessage,
+            [{ text: t.confirm }]
+          );
+        }
+      } catch (error) {
+        console.error('[useRecording] Failed to check permissions:', error);
+        // Non-critical, continue recording
+      }
+    }, 5000); // Check every 5 seconds
+
+    return () => {
+      clearInterval(permissionCheckInterval);
+    };
+  }, [isRecording, t, stopRecording]);
 
   // Auto-chunk or stop recording based on duration and tier
   useEffect(() => {
@@ -66,17 +98,29 @@ export function useRecording(): UseRecordingReturn {
     const chunkDuration = getChunkDuration(userTier);
     const canAutoChunk = allowsMultiPart(userTier);
 
-    // Check if we've reached the chunk duration (with larger buffer to prevent missing the trigger)
-    // Use >= chunkDuration - 0.5 to catch it even if timer lags slightly
-    if (duration >= chunkDuration - 0.5 && duration < chunkDuration + 5) {
+    // Check if we've reached the chunk duration
+    // Narrow window to exact duration ±0.5s to prevent multiple triggers
+    if (duration >= chunkDuration - 0.5 && duration <= chunkDuration + 0.5) {
+      // Additional debounce check: prevent triggering if we already chunked in last 10 seconds
+      const now = Date.now();
+      const timeSinceLastChunk = now - lastAutoChunkTime.current;
+      const MIN_CHUNK_INTERVAL = 10000; // 10 seconds minimum between chunks
+
+      if (timeSinceLastChunk < MIN_CHUNK_INTERVAL) {
+        console.log(`[useRecording] Skipping auto-chunk trigger - only ${(timeSinceLastChunk/1000).toFixed(1)}s since last chunk`);
+        return;
+      }
+
       if (canAutoChunk) {
         // VIP: Auto-save chunk and continue recording (invisible to user)
         console.log(`[useRecording] Auto-chunking triggered at ${duration}s, total chunks: ${audioChunksRef.current.length + 1}`);
-        // Set flag BEFORE calling to prevent multiple triggers
+        // Set flag AND timestamp BEFORE calling to prevent multiple triggers
         isAutoChunking.current = true;
+        lastAutoChunkTime.current = now;
         handleAutoChunk().catch((error) => {
           console.error('[useRecording] Auto-chunk failed:', error);
           isAutoChunking.current = false;
+          // Don't reset lastAutoChunkTime - we still want debouncing even on failure
           // Don't stop recording on auto-chunk failure, just log it
         });
       } else {
@@ -84,16 +128,16 @@ export function useRecording(): UseRecordingReturn {
         console.log(`[useRecording] Recording limit reached at ${duration}s, stopping...`);
         stopRecording().then(() => {
           Alert.alert(
-            '錄音已完成',
-            `錄音已達到 ${Math.floor(chunkDuration / 60)} 分鐘上限。\n\n升級為 VIP 會員即可無限制錄音！`,
-            [{ text: '確定' }]
+            t.recordingComplete,
+            t.recordingLimitReached.replace('{minutes}', Math.floor(chunkDuration / 60).toString()),
+            [{ text: t.confirm }]
           );
         }).catch((error) => {
           console.error('[useRecording] Failed to stop recording at limit:', error);
           Alert.alert(
-            '錄音錯誤',
-            '停止錄音時發生錯誤，但錄音數據已保存。',
-            [{ text: '確定' }]
+            t.recordingError,
+            t.recordingStopErrorSaved,
+            [{ text: t.confirm }]
           );
         });
       }
@@ -103,11 +147,13 @@ export function useRecording(): UseRecordingReturn {
   // Handle auto-chunking for VIP users (invisible to user)
   const handleAutoChunk = useCallback(async () => {
     const chunkIndex = audioChunksRef.current.length;
+    // Use timestamp-based naming to prevent collision on retry
+    const chunkTimestamp = Date.now();
     console.log(`[useRecording] Saving chunk ${chunkIndex + 1}...`);
 
     try {
       // Calculate chunk duration
-      const chunkDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      const chunkDuration = Math.floor((chunkTimestamp - startTimeRef.current) / 1000);
       totalDurationRef.current += chunkDuration;
 
       if (Platform.OS === 'web') {
@@ -153,8 +199,8 @@ export function useRecording(): UseRecordingReturn {
           throw new Error(`Recording file does not exist: ${uri}`);
         }
 
-        // Move to chunk file location
-        const chunkPath = `${FileSystem.documentDirectory}recordings/${recordingIdRef.current}_chunk${chunkIndex}.m4a`;
+        // Move to chunk file location (use timestamp to prevent collision on retry)
+        const chunkPath = `${FileSystem.documentDirectory}recordings/${recordingIdRef.current}_chunk${chunkTimestamp}.m4a`;
 
         // Ensure directory exists
         await FileSystem.makeDirectoryAsync(
@@ -207,9 +253,9 @@ export function useRecording(): UseRecordingReturn {
       }
 
       Alert.alert(
-        '錄音錯誤',
-        '自動分段時發生錯誤，錄音已停止。已保存的部分將被保留。',
-        [{ text: '確定' }]
+        t.autoChunkError,
+        t.autoChunkErrorPreserved,
+        [{ text: t.confirm }]
       );
 
       throw error; // Re-throw for caller to handle
@@ -258,6 +304,7 @@ export function useRecording(): UseRecordingReturn {
         recordingIdRef.current = generateUUID();
         audioChunksRef.current = [];
         totalDurationRef.current = 0;
+        lastAutoChunkTime.current = 0;
         console.log('[useRecording] Starting new recording session:', recordingIdRef.current);
       } else {
         console.log(`[useRecording] Continuing auto-chunked recording: ${recordingIdRef.current}`);

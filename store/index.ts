@@ -158,9 +158,17 @@ export const useAppStore = create<AppState>()(
       currentRecordingId: null,
 
       addRecording: (recording) =>
-        set((state) => ({
-          recordings: [recording, ...state.recordings],
-        })),
+        set((state) => {
+          // Prevent duplicate recordings with the same ID
+          const exists = state.recordings.some((r) => r.id === recording.id);
+          if (exists) {
+            console.warn(`[Store] Attempted to add duplicate recording: ${recording.id}`);
+            return state; // No change
+          }
+          return {
+            recordings: [recording, ...state.recordings],
+          };
+        }),
 
       updateRecording: (id, updates) =>
         set((state) => ({
