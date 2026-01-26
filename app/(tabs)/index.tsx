@@ -454,7 +454,7 @@ export default function HomeScreen() {
       console.log('Processing started, polling for updates...');
 
       // Poll for recording updates (more reliable than real-time subscriptions)
-      const pollForUpdates = async () => {
+      const pollForUpdates = () => {
         const maxAttempts = 60; // Poll for up to 2 minutes (60 * 2 seconds)
         let attempts = 0;
         const activeTimeouts: NodeJS.Timeout[] = []; // Track all timeouts for proper cleanup
@@ -532,7 +532,7 @@ export default function HomeScreen() {
         };
       };
 
-      const cleanupPoll = await pollForUpdates();
+      const cleanupPoll = pollForUpdates();
 
       // Store cleanup function so it can be called on component unmount
       pollingCleanupRef.current = cleanupPoll;

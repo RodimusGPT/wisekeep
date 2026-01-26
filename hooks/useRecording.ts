@@ -45,6 +45,7 @@ export function useRecording(): UseRecordingReturn {
   const webChunksRef = useRef<Blob[]>([]);
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
+  const isMountedRef = useRef<boolean>(true); // Track component lifecycle for async callbacks
 
   // Auto-chunking support (invisible to user - chunks combined into one recording)
   const recordingIdRef = useRef<string | null>(null); // ID for current recording session
@@ -140,12 +141,16 @@ export function useRecording(): UseRecordingReturn {
         // Normal users: Hard stop at limit
         console.log(`[useRecording] Recording limit reached at ${duration}s, stopping...`);
         stopRecording().then(() => {
+          // Guard against executing after unmount
+          if (!isMountedRef.current) return;
           Alert.alert(
             tRef.current.recordingComplete,
             tRef.current.recordingLimitReached.replace('{minutes}', Math.floor(chunkDuration / 60).toString()),
             [{ text: tRef.current.confirm }]
           );
         }).catch((error) => {
+          // Guard against executing after unmount
+          if (!isMountedRef.current) return;
           console.error('[useRecording] Failed to stop recording at limit:', error);
           Alert.alert(
             tRef.current.recordingError,
@@ -650,6 +655,9 @@ export function useRecording(): UseRecordingReturn {
       setIsRecording(false);
       setDuration(0);
       setMetering(0);
+      // Reset auto-chunk state on error to prevent stuck state
+      isAutoChunking.current = false;
+      autoChunkPromise.current = null;
       throw error;
     }
   }, [addRecording, settings.language]);
@@ -658,6 +666,7 @@ export function useRecording(): UseRecordingReturn {
   useEffect(() => {
     return () => {
       console.log('[useRecording] Component unmounting, cleaning up...');
+      isMountedRef.current = false; // Mark component as unmounted
 
       // Clear duration timer
       if (durationIntervalRef.current) {
