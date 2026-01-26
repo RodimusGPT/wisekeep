@@ -140,8 +140,8 @@ export function useRecording(): UseRecordingReturn {
         isAutoChunking.current = true;
         lastAutoChunkTime.current = now;
 
-        // Track the promise to prevent overlapping operations
-        autoChunkPromise.current = handleAutoChunk()
+        // Create and track promise immediately to prevent race conditions
+        const chunkPromise = handleAutoChunk()
           .catch((error) => {
             console.error('[useRecording] Auto-chunk failed:', error);
             isAutoChunking.current = false;
@@ -149,8 +149,14 @@ export function useRecording(): UseRecordingReturn {
             // Don't stop recording on auto-chunk failure, just log it
           })
           .finally(() => {
-            autoChunkPromise.current = null;
+            // Only clear if this is still the current promise (prevent race)
+            if (autoChunkPromise.current === chunkPromise) {
+              autoChunkPromise.current = null;
+            }
           });
+
+        // Assign promise immediately after creation (atomic operation)
+        autoChunkPromise.current = chunkPromise;
       } else {
         // Normal users: Hard stop at limit
         console.log(`[useRecording] Recording limit reached at ${duration}s, stopping...`);
@@ -174,7 +180,7 @@ export function useRecording(): UseRecordingReturn {
         });
       }
     }
-  }, [isInChunkWindow, isRecording, user, duration]); // duration needed for alert message only
+  }, [isInChunkWindow, isRecording, user]); // duration captured in isInChunkWindow memo
 
   // Handle auto-chunking for VIP users (invisible to user)
   const handleAutoChunk = useCallback(async () => {
@@ -493,11 +499,23 @@ export function useRecording(): UseRecordingReturn {
           return null;
         }
 
-        // Stop the MediaRecorder
+        // Stop the MediaRecorder with timeout
         return new Promise((resolve, reject) => {
           const mediaRecorder = webRecorderRef.current!;
 
+          // Timeout to prevent indefinite hang
+          const stopTimeout = setTimeout(() => {
+            console.error('[useRecording] MediaRecorder stop timeout');
+            // Cleanup on timeout
+            if (webStreamRef.current) {
+              webStreamRef.current.getTracks().forEach(track => track.stop());
+              webStreamRef.current = null;
+            }
+            reject(new Error('MediaRecorder stop timeout after 5 seconds'));
+          }, 5000);
+
           mediaRecorder.onstop = () => {
+            clearTimeout(stopTimeout); // Clear timeout on successful stop
             // Stop all tracks immediately
             if (webStreamRef.current) {
               webStreamRef.current.getTracks().forEach(track => track.stop());

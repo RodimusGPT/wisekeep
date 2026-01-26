@@ -370,6 +370,19 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     return total * 1000; // Convert to milliseconds
   }, [audioChunks.length, chunkDurations, status.duration]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      console.log('[AudioPlayer] Component unmounting, clearing all state');
+      // Clear all chunk switching state
+      wasPlayingBeforeChunkSwitch.current = false;
+      isSwitchingChunks.current = false;
+      pendingSeekPosition.current = null;
+      totalRecordingDuration.current = 0;
+      // Note: React will clean up state arrays automatically
+    };
+  }, []);
+
   return {
     isPlaying: status.playing || false,
     isLoaded,

@@ -190,6 +190,7 @@ export default function HomeScreen() {
       console.log(`[saveRecordingOnly] Uploading ${chunksToUpload.length} chunk(s)...`);
 
       const allUploadedChunks: Array<{ url: string; startTime: number; endTime: number; index: number }> = [];
+      const blobUrlsToRevoke: string[] = []; // Track blob URLs for cleanup after save
       const MAX_RETRIES = 3;
       const RETRY_DELAY = 1000; // ms
 
@@ -266,15 +267,9 @@ export default function HomeScreen() {
 
             uploadSuccess = true;
 
-            // Cleanup: Revoke blob URL immediately after successful upload (web only)
+            // Track blob URL for cleanup after database save (web only)
             if (Platform.OS === 'web' && chunkUri.startsWith('blob:')) {
-              try {
-                URL.revokeObjectURL(chunkUri);
-                console.log(`[saveRecordingOnly] Revoked blob URL for chunk ${i + 1}`);
-              } catch (revokeError) {
-                console.warn(`[saveRecordingOnly] Failed to revoke blob URL for chunk ${i + 1}:`, revokeError);
-                // Non-critical, continue
-              }
+              blobUrlsToRevoke.push(chunkUri);
             }
 
           } catch (error) {
@@ -311,11 +306,36 @@ export default function HomeScreen() {
         summary: [],
       });
 
+      // Cleanup: Revoke blob URLs after successful save (web only)
+      if (Platform.OS === 'web' && blobUrlsToRevoke.length > 0) {
+        console.log(`[saveRecordingOnly] Revoking ${blobUrlsToRevoke.length} blob URLs after save`);
+        blobUrlsToRevoke.forEach(url => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (revokeError) {
+            console.warn('[saveRecordingOnly] Failed to revoke blob URL:', revokeError);
+          }
+        });
+      }
+
       setProcessingId(null);
       router.push(`/recording/${recordingId}`);
 
     } catch (error) {
       console.error('Save error:', error);
+
+      // Cleanup: Revoke blob URLs even on error (web only)
+      if (Platform.OS === 'web' && blobUrlsToRevoke.length > 0) {
+        console.log(`[saveRecordingOnly] Revoking ${blobUrlsToRevoke.length} blob URLs after error`);
+        blobUrlsToRevoke.forEach(url => {
+          try {
+            URL.revokeObjectURL(url);
+          } catch (revokeError) {
+            console.warn('[saveRecordingOnly] Failed to revoke blob URL:', revokeError);
+          }
+        });
+      }
+
       updateRecording(recordingId, {
         status: 'ready',
         notes: [{
@@ -477,6 +497,13 @@ export default function HomeScreen() {
             if (dbRecording) {
               console.log('Recording status from DB:', dbRecording.status);
 
+              // Validate status is one of expected values
+              const validStatuses = ['recorded', 'processing_notes', 'processing_summary', 'ready', 'error'];
+              if (!validStatuses.includes(dbRecording.status)) {
+                console.warn('[Polling] Unexpected status from database:', dbRecording.status);
+                // Continue anyway but log the issue
+              }
+
               // Validate and sanitize database response
               const validatedNotes = Array.isArray(dbRecording.notes)
                 ? dbRecording.notes.filter((note): note is NoteLine =>
@@ -492,6 +519,9 @@ export default function HomeScreen() {
               const validatedSummary = Array.isArray(dbRecording.summary)
                 ? dbRecording.summary.filter((item): item is string => typeof item === 'string')
                 : [];
+
+              // Guard against state update after unmount
+              if (isCancelled) return;
 
               // Update local state with validated database values
               updateRecording(recordingId, {
