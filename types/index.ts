@@ -12,7 +12,7 @@ export interface Recording {
   label?: string; // User-defined label for easy identification
   createdAt: string; // ISO date string
   duration: number; // in seconds
-  audioUri: string; // local file path
+  audioUri: string; // local file path (first chunk for chunked recordings)
   audioRemoteUrl?: string; // Supabase storage URL if uploaded
   status: 'recording' | 'recorded' | 'processing_notes' | 'notes_ready' | 'processing_summary' | 'ready' | 'error';
   notes?: NoteLine[];
@@ -20,10 +20,10 @@ export interface Recording {
   language?: Language;
   errorMessage?: string;
 
-  // Multi-part recording support (for VIP unlimited recordings)
-  partNumber?: number; // Which part this is (1, 2, 3...) - undefined for single recordings
-  parentRecordingId?: string; // ID of the parent recording if this is a continuation part
-  totalParts?: number; // Total number of parts - only set on completion
+  // Auto-chunked recording support (for VIP unlimited recordings)
+  // Chunks are created every 20 minutes to stay under 25MB Groq limit
+  // But presented to user as one seamless recording
+  audioChunks?: string[]; // Array of local file paths for each chunk
 }
 
 export interface AppSettings {

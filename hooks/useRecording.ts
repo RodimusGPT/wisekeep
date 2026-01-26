@@ -45,9 +45,10 @@ export function useRecording(): UseRecordingReturn {
   const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const startTimeRef = useRef<number>(0);
 
-  // Multi-part recording tracking
-  const currentPartNumber = useRef<number>(1);
-  const parentRecordingId = useRef<string | null>(null);
+  // Auto-chunking support (invisible to user - chunks combined into one recording)
+  const recordingIdRef = useRef<string | null>(null); // ID for current recording session
+  const audioChunksRef = useRef<string[]>([]); // Accumulated chunk file paths
+  const totalDurationRef = useRef<number>(0); // Total duration across all chunks
   const isAutoChunking = useRef<boolean>(false);
 
   const { addRecording, settings, setMicrophonePermission, user } = useAppStore();
@@ -68,8 +69,8 @@ export function useRecording(): UseRecordingReturn {
     // Check if we've reached the chunk duration (with small buffer to prevent multiple triggers)
     if (duration >= chunkDuration && duration < chunkDuration + 2) {
       if (canAutoChunk) {
-        // VIP: Auto-save chunk and continue recording
-        console.log(`[useRecording] Auto-chunking triggered: Part ${currentPartNumber.current} at ${duration}s`);
+        // VIP: Auto-save chunk and continue recording (invisible to user)
+        console.log(`[useRecording] Auto-chunking triggered at ${duration}s, total chunks: ${audioChunksRef.current.length + 1}`);
         isAutoChunking.current = true;
         handleAutoChunk();
       } else {
@@ -86,34 +87,76 @@ export function useRecording(): UseRecordingReturn {
     }
   }, [duration, isRecording, user]);
 
-  // Handle auto-chunking for VIP users
+  // Handle auto-chunking for VIP users (invisible to user)
   const handleAutoChunk = useCallback(async () => {
     try {
-      console.log(`[useRecording] Saving chunk ${currentPartNumber.current}...`);
+      const chunkIndex = audioChunksRef.current.length;
+      console.log(`[useRecording] Saving chunk ${chunkIndex + 1}...`);
 
-      // Stop current recording and save it
-      const recording = await stopRecording();
+      // Calculate chunk duration
+      const chunkDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+      totalDurationRef.current += chunkDuration;
 
-      if (recording) {
-        // Set parent ID if this is the first part
-        if (currentPartNumber.current === 1) {
-          parentRecordingId.current = recording.id;
+      if (Platform.OS === 'web') {
+        // Web: Stop MediaRecorder, save blob, restart
+        if (!webRecorderRef.current) {
+          throw new Error('No web recorder');
         }
 
-        currentPartNumber.current += 1;
+        // Create blob from current chunks
+        const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
+        const chunkUri = URL.createObjectURL(blob);
+        audioChunksRef.current.push(chunkUri);
 
-        // Brief pause to ensure clean state
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Clear chunks for next segment
+        webChunksRef.current = [];
 
-        // Continue recording next part
-        console.log(`[useRecording] Starting part ${currentPartNumber.current}...`);
-        await startRecording();
-        isAutoChunking.current = false;
+        console.log(`[useRecording] Chunk ${chunkIndex + 1} saved (web), total duration: ${totalDurationRef.current}s`);
+      } else {
+        // Native: Stop recorder, move file to chunk location, restart
+        await recorder.stop();
+
+        const uri = recorder.uri;
+        if (!uri) {
+          throw new Error('No recording URI');
+        }
+
+        // Move to chunk file location
+        const chunkPath = `${FileSystem.documentDirectory}recordings/${recordingIdRef.current}_chunk${chunkIndex}.m4a`;
+
+        // Ensure directory exists
+        await FileSystem.makeDirectoryAsync(
+          `${FileSystem.documentDirectory}recordings/`,
+          { intermediates: true }
+        ).catch(() => {}); // Ignore if exists
+
+        await FileSystem.moveAsync({
+          from: uri,
+          to: chunkPath,
+        });
+
+        audioChunksRef.current.push(chunkPath);
+        console.log(`[useRecording] Chunk ${chunkIndex + 1} saved to ${chunkPath}, total duration: ${totalDurationRef.current}s`);
+
+        // Restart recorder
+        await recorder.prepareToRecordAsync();
+        recorder.record();
       }
+
+      // Reset duration timer for next chunk
+      startTimeRef.current = Date.now();
+      setDuration(0);
+
+      isAutoChunking.current = false;
+      console.log(`[useRecording] Auto-chunk complete, continuing recording...`);
+
     } catch (error) {
       console.error('[useRecording] Auto-chunk error:', error);
       isAutoChunking.current = false;
-      Alert.alert('錄音錯誤', '自動分段失敗，請重新開始錄音。');
+
+      // On error, stop recording completely
+      setIsRecording(false);
+      Alert.alert('錄音錯誤', '自動分段失敗，錄音已停止。');
     }
   }, []);
 
@@ -154,13 +197,14 @@ export function useRecording(): UseRecordingReturn {
 
   const startRecording = useCallback(async () => {
     try {
-      // Reset multi-part tracking for new recordings (not auto-chunks)
+      // Initialize new recording session (not for auto-chunks)
       if (!isAutoChunking.current) {
-        currentPartNumber.current = 1;
-        parentRecordingId.current = null;
-        console.log('[useRecording] Starting new recording session');
+        recordingIdRef.current = generateUUID();
+        audioChunksRef.current = [];
+        totalDurationRef.current = 0;
+        console.log('[useRecording] Starting new recording session:', recordingIdRef.current);
       } else {
-        console.log(`[useRecording] Continuing multi-part recording (part ${currentPartNumber.current})`);
+        console.log(`[useRecording] Continuing auto-chunked recording: ${recordingIdRef.current}`);
       }
 
       // Check/request permission
@@ -270,19 +314,28 @@ export function useRecording(): UseRecordingReturn {
 
   const stopRecording = useCallback(async (): Promise<Recording | null> => {
     try {
-      // If this is a manual stop (not auto-chunk), we should mark total parts on the parent recording
-      const isManualStop = !isAutoChunking.current;
-      const isMultiPart = currentPartNumber.current > 1 || parentRecordingId.current;
-
       // Stop duration timer
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
         durationIntervalRef.current = null;
       }
 
-      // Calculate final duration
-      const finalDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-      const recordingId = generateUUID();
+      // Calculate duration of current chunk
+      const currentChunkDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+
+      // Total duration = accumulated duration + current chunk
+      const totalDuration = totalDurationRef.current + currentChunkDuration;
+
+      // Use the recording ID generated at start
+      const recordingId = recordingIdRef.current || generateUUID();
+
+      console.log('[useRecording] Stopping recording:', {
+        recordingId,
+        currentChunkDuration,
+        totalAccumulated: totalDurationRef.current,
+        totalDuration,
+        chunksCount: audioChunksRef.current.length,
+      });
 
       // Web-specific stop recording
       if (Platform.OS === 'web') {
@@ -302,25 +355,31 @@ export function useRecording(): UseRecordingReturn {
             }
 
             // Defer heavy work to avoid blocking the 'stop' event handler
-            // This prevents the "[Violation] 'stop' handler took Xms" warning
             queueMicrotask(() => {
-              // Create blob from chunks
+              // Create blob for final chunk
               const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
-              const audioUri = URL.createObjectURL(blob);
+              const finalChunkUri = URL.createObjectURL(blob);
 
-              // Create recording object
+              // Add final chunk to array
+              const allChunks = [...audioChunksRef.current, finalChunkUri];
+
+              // Create recording object with all chunks
               const newRecording: Recording = {
                 id: recordingId,
                 createdAt: new Date().toISOString(),
-                duration: finalDuration,
-                audioUri: audioUri,
-                status: 'recorded', // Will be uploaded next, not processing yet
+                duration: totalDuration,
+                audioUri: allChunks[0], // First chunk as primary URI
+                status: 'recorded',
                 language: settings.language,
-                // Multi-part metadata
-                partNumber: currentPartNumber.current > 1 || parentRecordingId.current ? currentPartNumber.current : undefined,
-                parentRecordingId: parentRecordingId.current || undefined,
-                totalParts: isManualStop && isMultiPart ? currentPartNumber.current : undefined,
+                // Include chunks array if this was auto-chunked
+                audioChunks: allChunks.length > 1 ? allChunks : undefined,
               };
+
+              console.log('[useRecording] Web recording created:', {
+                id: newRecording.id,
+                chunks: allChunks.length,
+                duration: totalDuration,
+              });
 
               // Add to store
               addRecording(newRecording);
@@ -328,15 +387,12 @@ export function useRecording(): UseRecordingReturn {
               // Reset state
               webRecorderRef.current = null;
               webChunksRef.current = [];
+              audioChunksRef.current = [];
+              totalDurationRef.current = 0;
+              recordingIdRef.current = null;
               setIsRecording(false);
               setDuration(0);
               setMetering(0);
-
-              // Reset multi-part tracking if manual stop
-              if (isManualStop) {
-                currentPartNumber.current = 1;
-                parentRecordingId.current = null;
-              }
 
               resolve(newRecording);
             });
@@ -361,17 +417,10 @@ export function useRecording(): UseRecordingReturn {
 
       // Compare wall-clock duration vs recorder's reported time
       console.log('[useRecording] Duration comparison:', {
-        wallClockDuration: finalDuration,
-        recorderCurrentTime: recorderCurrentTime,
-        difference: Math.abs(finalDuration - recorderCurrentTime),
-        isAutoChunk: isAutoChunking.current,
+        currentChunkDuration,
+        recorderCurrentTime,
+        difference: Math.abs(currentChunkDuration - recorderCurrentTime),
       });
-
-      // For auto-chunks, use wall-clock duration for precision
-      // For manual stops, prefer recorder's reported time if available
-      const effectiveDuration = isAutoChunking.current
-        ? finalDuration
-        : (recorderCurrentTime > 0 ? Math.floor(recorderCurrentTime) : finalDuration);
 
       // Check if recorder is actually recording
       if (!recorder.isRecording) {
@@ -404,9 +453,10 @@ export function useRecording(): UseRecordingReturn {
         throw new Error('No recording URI - recording may have failed to capture audio');
       }
 
-      // Move file to permanent location
-      const permanentUri = `${FileSystem.documentDirectory}recordings/${recordingId}.m4a`;
-      console.log('[useRecording] Moving file from:', uri, 'to:', permanentUri);
+      // Save final chunk to permanent location
+      const chunkIndex = audioChunksRef.current.length;
+      const finalChunkPath = `${FileSystem.documentDirectory}recordings/${recordingId}_chunk${chunkIndex}.m4a`;
+      console.log('[useRecording] Moving final chunk from:', uri, 'to:', finalChunkPath);
 
       // Ensure directory exists
       try {
@@ -416,106 +466,62 @@ export function useRecording(): UseRecordingReturn {
         );
       } catch (dirError) {
         console.warn('[useRecording] Directory may already exist:', dirError);
-        // Directory might already exist, continue
       }
 
+      let finalChunkUri: string;
       try {
         await FileSystem.moveAsync({
           from: uri,
-          to: permanentUri,
+          to: finalChunkPath,
         });
-        console.log('[useRecording] File moved successfully');
+        console.log('[useRecording] Final chunk moved successfully');
+        finalChunkUri = finalChunkPath;
 
-        // Verify file size after move
-        const fileInfo = await FileSystem.getInfoAsync(permanentUri);
+        // Verify file size
+        const fileInfo = await FileSystem.getInfoAsync(finalChunkPath);
         if (fileInfo.exists && 'size' in fileInfo) {
           const fileSizeMB = (fileInfo.size as number) / 1024 / 1024;
-          // Estimate expected size: M4A voice ~8KB/s to 16KB/s
-          const expectedMinSize = effectiveDuration * 8 * 1024; // 64 kbps
-          const expectedMaxSize = effectiveDuration * 16 * 1024; // 128 kbps
-          console.log('[useRecording] File verification:', {
-            actualSizeBytes: fileInfo.size,
-            actualSizeMB: fileSizeMB.toFixed(2),
-            expectedMinBytes: expectedMinSize,
-            expectedMaxBytes: expectedMaxSize,
-            durationSeconds: effectiveDuration,
-          });
-
-          if ((fileInfo.size as number) < expectedMinSize * 0.5) {
-            console.warn('[useRecording] WARNING: File appears too small for recorded duration!');
-          }
+          console.log('[useRecording] Final chunk size:', fileSizeMB.toFixed(2), 'MB');
         }
       } catch (moveError) {
-        console.error('[useRecording] Failed to move file:', moveError);
-        // Try to use original URI if move fails
+        console.error('[useRecording] Failed to move final chunk:', moveError);
         console.log('[useRecording] Using original URI instead');
-
-        // Create recording with original URI
-        const newRecording: Recording = {
-          id: recordingId,
-          createdAt: new Date().toISOString(),
-          duration: effectiveDuration,
-          audioUri: uri, // Use original URI
-          status: 'recorded',
-          language: settings.language,
-          // Multi-part metadata
-          partNumber: currentPartNumber.current > 1 || parentRecordingId.current ? currentPartNumber.current : undefined,
-          parentRecordingId: parentRecordingId.current || undefined,
-          totalParts: isManualStop && isMultiPart ? currentPartNumber.current : undefined,
-        };
-
-        addRecording(newRecording);
-        setIsRecording(false);
-        setDuration(0);
-        setMetering(0);
-
-        // Reset multi-part tracking if manual stop
-        if (isManualStop) {
-          currentPartNumber.current = 1;
-          parentRecordingId.current = null;
-        }
-
-        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        return newRecording;
+        finalChunkUri = uri;
       }
 
-      // Create recording object
+      // Combine all chunks (previous chunks + final chunk)
+      const allChunks = [...audioChunksRef.current, finalChunkUri];
+
+      // Create recording object with all chunks
       const newRecording: Recording = {
         id: recordingId,
         createdAt: new Date().toISOString(),
-        duration: effectiveDuration,
-        audioUri: permanentUri,
-        status: 'recorded', // Will be uploaded next, not processing yet
+        duration: totalDuration,
+        audioUri: allChunks[0], // First chunk as primary URI
+        status: 'recorded',
         language: settings.language,
-        // Multi-part metadata
-        partNumber: currentPartNumber.current > 1 || parentRecordingId.current ? currentPartNumber.current : undefined,
-        parentRecordingId: parentRecordingId.current || undefined,
-        totalParts: isManualStop && isMultiPart ? currentPartNumber.current : undefined,
+        // Include chunks array if this was auto-chunked
+        audioChunks: allChunks.length > 1 ? allChunks : undefined,
       };
 
-      console.log('[useRecording] Created recording:', {
+      console.log('[useRecording] Native recording created:', {
         id: recordingId,
-        effectiveDuration,
-        wallClockDuration: finalDuration,
+        chunks: allChunks.length,
+        totalDuration,
+        currentChunkDuration,
         recorderTime: recorderCurrentTime,
-        partNumber: newRecording.partNumber,
-        parentRecordingId: newRecording.parentRecordingId,
-        totalParts: newRecording.totalParts,
       });
 
       // Add to store
       addRecording(newRecording);
 
-      // Reset state
+      // Reset all state
+      audioChunksRef.current = [];
+      totalDurationRef.current = 0;
+      recordingIdRef.current = null;
       setIsRecording(false);
       setDuration(0);
       setMetering(0);
-
-      // Reset multi-part tracking if manual stop
-      if (isManualStop) {
-        currentPartNumber.current = 1;
-        parentRecordingId.current = null;
-      }
 
       // Haptic feedback
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

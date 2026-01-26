@@ -14,7 +14,6 @@ import { useAppStore } from '@/store';
 import { useI18n, useTheme } from '@/hooks';
 import { RecordingCard } from '@/components/ui';
 import { getFontSize, Recording } from '@/types';
-import { shouldShowInLibrary } from '@/utils/recording-display';
 
 export default function LibraryScreen() {
   const { isDark, colors } = useTheme();
@@ -29,20 +28,14 @@ export default function LibraryScreen() {
   const { background: backgroundColor, text: textColor, textSecondary: secondaryColor, border: borderColor } = colors;
   const inputBackgroundColor = isDark ? Colors.backgroundSecondaryDark : Colors.backgroundSecondary;
 
-  // Filter recordings based on search query and multi-part status
+  // Filter recordings based on search query
   const filteredRecordings = useMemo(() => {
-    // First, filter out child parts of multi-part recordings (only show parent)
-    const visibleRecordings = recordings.filter((recording) =>
-      shouldShowInLibrary(recording, recordings)
-    );
-
-    // Then apply search filter if there's a query
     if (!searchQuery.trim()) {
-      return visibleRecordings;
+      return recordings;
     }
 
     const query = searchQuery.toLowerCase();
-    return visibleRecordings.filter((recording) => {
+    return recordings.filter((recording) => {
       // Search in notes
       if (recording.notes) {
         const notesMatch = recording.notes.some((note) =>

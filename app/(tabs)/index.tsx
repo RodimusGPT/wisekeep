@@ -107,35 +107,8 @@ export default function HomeScreen() {
           setProcessingId(recording.id);
           setCurrentRecordingId(recording.id);
 
-          // For multi-part recordings, upload all parts that haven't been uploaded yet
-          if (recording.totalParts && recording.totalParts > 1) {
-            console.log(`[Multi-part] Uploading ${recording.totalParts} parts...`);
-
-            // Find all parts of this multi-part recording
-            const parentId = recording.parentRecordingId || recording.id;
-            const allParts = recordings.filter(
-              r => r.id === parentId || r.parentRecordingId === parentId
-            ).sort((a, b) => (a.partNumber || 0) - (b.partNumber || 0));
-
-            // Upload each part that doesn't have a remote URL (don't navigate for these)
-            for (const part of allParts) {
-              if (!part.audioRemoteUrl) {
-                console.log(`[Multi-part] Uploading part ${part.partNumber}...`);
-                await saveRecordingOnly(part.id, part.audioUri, part.duration, false);
-              }
-            }
-
-            // Upload the final part if it doesn't have a remote URL, and navigate to it
-            if (!recording.audioRemoteUrl) {
-              await saveRecordingOnly(recording.id, recording.audioUri, recording.duration, true);
-            } else {
-              // All parts already uploaded, just navigate to the parent recording
-              router.push(`/recording/${parentId}`);
-            }
-          } else {
-            // Single recording - just upload it and navigate
-            await saveRecordingOnly(recording.id, recording.audioUri, recording.duration, true);
-          }
+          // Upload recording (handles both single and auto-chunked recordings)
+          await saveRecordingOnly(recording);
         }
       } else {
         // Start recording - check storage limit first
@@ -184,8 +157,9 @@ export default function HomeScreen() {
   }, [isRecording, stopRecording, setCurrentRecordingId, user, hasPermission, requestPermission, startRecording, t, router, settings.language]);
 
   // Save recording without AI processing (on-demand model)
-  const saveRecordingOnly = async (recordingId: string, audioUri: string, durationSeconds: number, shouldNavigate: boolean = true) => {
-    console.log('saveRecordingOnly started for:', recordingId);
+  const saveRecordingOnly = async (recording: Recording) => {
+    console.log('saveRecordingOnly started for:', recording.id);
+    const { id: recordingId, audioUri, audioChunks, duration: durationSeconds } = recording;
 
     if (!user) {
       console.error('No user logged in');
@@ -199,75 +173,75 @@ export default function HomeScreen() {
     }
 
     try {
-      // Step 1: Read the audio file
-      // On iOS/React Native, we pass base64 directly to uploadAudio (Blob doesn't work)
-      // On web, we use fetch to get a proper Blob
-      console.log('[saveRecordingOnly] Reading audio file from:', audioUri);
+      // Step 1 & 2: Upload all audio chunks
+      const chunksToUpload = audioChunks && audioChunks.length > 0 ? audioChunks : [audioUri];
+      console.log(`[saveRecordingOnly] Uploading ${chunksToUpload.length} chunk(s)...`);
 
-      let audioData: Blob | string;
+      const allUploadedChunks: Array<{ url: string; startTime: number; endTime: number; index: number }> = [];
 
-      if (Platform.OS === 'web') {
-        // Web: fetch works correctly with blob URLs
-        const response = await fetch(audioUri);
-        if (!response.ok) {
-          throw new Error(`Failed to fetch audio file: ${response.status} ${response.statusText}`);
-        }
-        audioData = await response.blob();
-        console.log('[saveRecordingOnly] Web blob size:', audioData.size);
-      } else {
-        // iOS/Android: Use the new expo-file-system File class
-        // File implements Blob interface, so we can use file.base64() to get base64 data
-        const file = new ExpoFile(audioUri);
-        if (!file.exists) {
-          throw new Error('Audio file does not exist');
-        }
-        if (file.size === 0) {
-          throw new Error('Audio file is empty - recording may have failed');
-        }
-        console.log('[saveRecordingOnly] Native file size:', file.size);
+      for (let i = 0; i < chunksToUpload.length; i++) {
+        const chunkUri = chunksToUpload[i];
+        console.log(`[saveRecordingOnly] Uploading chunk ${i + 1}/${chunksToUpload.length} from:`, chunkUri);
 
-        // Read as base64 - uploadAudio will convert to ArrayBuffer
-        audioData = await file.base64();
-        console.log('[saveRecordingOnly] Native base64 length:', audioData.length);
+        // Read audio chunk
+        let audioData: Blob | string;
+
+        if (Platform.OS === 'web') {
+          const response = await fetch(chunkUri);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch chunk ${i + 1}: ${response.status}`);
+          }
+          audioData = await response.blob();
+          console.log(`[saveRecordingOnly] Chunk ${i + 1} blob size:`, audioData.size);
+        } else {
+          const file = new ExpoFile(chunkUri);
+          if (!file.exists) {
+            throw new Error(`Chunk ${i + 1} file does not exist`);
+          }
+          if (file.size === 0) {
+            throw new Error(`Chunk ${i + 1} file is empty`);
+          }
+          console.log(`[saveRecordingOnly] Chunk ${i + 1} file size:`, file.size);
+          audioData = await file.base64();
+        }
+
+        // Upload chunk (note: uploadAudioChunked may further split large chunks)
+        const { chunks } = await uploadAudioChunked(
+          user.authUserId,
+          `${recordingId}_part${i}`,
+          audioData,
+          durationSeconds
+        );
+
+        // Add all sub-chunks from this part
+        allUploadedChunks.push(...chunks);
+        console.log(`[saveRecordingOnly] Chunk ${i + 1} uploaded: ${chunks.length} sub-chunk(s)`);
       }
 
-      // Step 2: Upload with automatic chunking
-      console.log('Uploading audio (with chunking if needed)...');
-      const { chunks, needsChunking } = await uploadAudioChunked(
-        user.authUserId,
-        recordingId,
-        audioData,
-        durationSeconds
-      );
-      console.log(`Upload complete: ${chunks.length} chunk(s), chunking ${needsChunking ? 'used' : 'not needed'}`);
+      console.log(`[saveRecordingOnly] All uploads complete: ${allUploadedChunks.length} total chunk(s)`);
 
-      // Step 3: Save recording to database with 'recorded' status (NOT processing)
-      console.log('Saving recording to database with recorded status...');
+      // Step 3: Save recording to database with 'recorded' status
+      console.log('Saving recording to database...');
       await saveRecordingToDb({
         id: recordingId,
         user_id: user.id,
         device_id: user.deviceId || 'unknown',
         duration: durationSeconds,
-        audio_url: chunks[0].url,
-        status: 'recorded', // New status: saved but not yet processed
+        audio_url: allUploadedChunks[0].url,
+        status: 'recorded',
         language: settings.language,
       });
-      console.log('Recording saved successfully');
 
-      // Update local state with remote URL so it's available for transcription
+      // Update local state with remote URL
       updateRecording(recordingId, {
         status: 'recorded',
-        audioRemoteUrl: chunks[0].url,
+        audioRemoteUrl: allUploadedChunks[0].url,
         notes: [],
         summary: [],
       });
 
       setProcessingId(null);
-
-      // Navigate to recording detail screen so user can start processing (unless this is a multi-part upload)
-      if (shouldNavigate) {
-        router.push(`/recording/${recordingId}`);
-      }
+      router.push(`/recording/${recordingId}`);
 
     } catch (error) {
       console.error('Save error:', error);

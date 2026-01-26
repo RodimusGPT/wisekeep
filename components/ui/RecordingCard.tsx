@@ -12,7 +12,6 @@ import { useAppStore } from '@/store';
 import { useI18n, useTheme } from '@/hooks';
 import { Recording, getFontSize } from '@/types';
 import { format, isToday, isYesterday, differenceInDays } from 'date-fns';
-import { isMultiPartRecording } from '@/utils/recording-display';
 
 interface RecordingCardProps {
   recording: Recording;
@@ -191,38 +190,20 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
               </View>
             ) : null}
 
-            {/* Multi-part indicator */}
-            {(isMultiPartRecording(recording) || ((recording.notes && recording.notes.length > 0) || (recording.summary && recording.summary.length > 0))) && (
+            {/* Status indicator - combined notes & summary */}
+            {((recording.notes && recording.notes.length > 0) || (recording.summary && recording.summary.length > 0)) && (
               <View style={styles.indicators}>
-                {/* Show multi-part badge if this is a multi-part recording */}
-                {isMultiPartRecording(recording) && recording.totalParts && (
-                  <View style={[styles.indicator, { backgroundColor: isDark ? 'rgba(21, 101, 192, 0.2)' : 'rgba(21, 101, 192, 0.1)' }]}>
-                    <Ionicons name="albums" size={18} color={Colors.processing} />
-                    <Text
-                      style={[
-                        styles.indicatorText,
-                        { color: Colors.processing, fontSize: getFontSize('small', textSize) },
-                      ]}
-                    >
-                      {`共 ${recording.totalParts} 部分`}
-                    </Text>
-                  </View>
-                )}
-
-                {/* Summary ready indicator */}
-                {((recording.notes && recording.notes.length > 0) || (recording.summary && recording.summary.length > 0)) && (
-                  <View style={[styles.indicator, { backgroundColor: isDark ? 'rgba(46, 125, 50, 0.2)' : 'rgba(46, 125, 50, 0.1)' }]}>
-                    <Ionicons name="document-text" size={18} color={Colors.success} />
-                    <Text
-                      style={[
-                        styles.indicatorText,
-                        { color: Colors.success, fontSize: getFontSize('small', textSize) },
-                      ]}
-                    >
-                      {t.summaryReady}
-                    </Text>
-                  </View>
-                )}
+                <View style={[styles.indicator, { backgroundColor: isDark ? 'rgba(46, 125, 50, 0.2)' : 'rgba(46, 125, 50, 0.1)' }]}>
+                  <Ionicons name="document-text" size={18} color={Colors.success} />
+                  <Text
+                    style={[
+                      styles.indicatorText,
+                      { color: Colors.success, fontSize: getFontSize('small', textSize) },
+                    ]}
+                  >
+                    {t.summaryReady}
+                  </Text>
+                </View>
               </View>
             )}
           </View>
