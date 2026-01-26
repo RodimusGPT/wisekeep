@@ -55,6 +55,18 @@ export default function HomeScreen() {
   const [elapsedTime, setElapsedTime] = useState(0);
   const spinAnim = useRef(new Animated.Value(0)).current;
   const scrollViewRef = useRef<ScrollView>(null);
+  const pollingCleanupRef = useRef<(() => void) | null>(null);
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (pollingCleanupRef.current) {
+        console.log('[HomeScreen] Unmounting - cleaning up active polling');
+        pollingCleanupRef.current();
+        pollingCleanupRef.current = null;
+      }
+    };
+  }, []);
 
   // Scroll to top when tab is focused (so record button is visible)
   useFocusEffect(
@@ -434,13 +446,22 @@ export default function HomeScreen() {
       const pollForUpdates = async () => {
         const maxAttempts = 60; // Poll for up to 2 minutes (60 * 2 seconds)
         let attempts = 0;
+        let timeoutId: NodeJS.Timeout | null = null;
+        let isCancelled = false;
 
         const checkStatus = async () => {
+          if (isCancelled) {
+            console.log('[Polling] Cancelled, stopping poll');
+            return;
+          }
+
           attempts++;
           console.log(`Polling for recording status (attempt ${attempts})...`);
 
           try {
             const dbRecording = await fetchRecordingById(recordingId);
+
+            if (isCancelled) return; // Check again after async operation
 
             if (dbRecording) {
               console.log('Recording status from DB:', dbRecording.status);
@@ -466,25 +487,42 @@ export default function HomeScreen() {
             }
 
             // Continue polling if not done and under max attempts
-            if (attempts < maxAttempts) {
-              setTimeout(checkStatus, 2000); // Poll every 2 seconds
+            if (attempts < maxAttempts && !isCancelled) {
+              timeoutId = setTimeout(checkStatus, 2000); // Poll every 2 seconds
             } else {
               console.log('Polling timeout - stopping');
-              setProcessingId(null);
+              if (!isCancelled) {
+                setProcessingId(null);
+              }
             }
           } catch (error) {
             console.error('Error polling for updates:', error);
-            if (attempts < maxAttempts) {
-              setTimeout(checkStatus, 2000);
+            if (attempts < maxAttempts && !isCancelled) {
+              timeoutId = setTimeout(checkStatus, 2000);
+            } else if (!isCancelled) {
+              setProcessingId(null);
             }
           }
         };
 
         // Start polling after a short delay (give Edge Function time to start)
-        setTimeout(checkStatus, 1000);
+        timeoutId = setTimeout(checkStatus, 1000);
+
+        // Return cleanup function
+        return () => {
+          console.log('[Polling] Cleanup called, cancelling poll');
+          isCancelled = true;
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+        };
       };
 
-      pollForUpdates();
+      const cleanupPoll = await pollForUpdates();
+
+      // Store cleanup function so it can be called on component unmount
+      pollingCleanupRef.current = cleanupPoll;
 
     } catch (error) {
       console.error('Processing error:', error);

@@ -88,6 +88,13 @@ export function useRecording(): UseRecordingReturn {
             `錄音已達到 ${Math.floor(chunkDuration / 60)} 分鐘上限。\n\n升級為 VIP 會員即可無限制錄音！`,
             [{ text: '確定' }]
           );
+        }).catch((error) => {
+          console.error('[useRecording] Failed to stop recording at limit:', error);
+          Alert.alert(
+            '錄音錯誤',
+            '停止錄音時發生錯誤，但錄音數據已保存。',
+            [{ text: '確定' }]
+          );
         });
       }
     }

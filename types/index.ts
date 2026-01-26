@@ -2,7 +2,7 @@ import { Language } from '@/i18n/translations';
 
 export interface NoteLine {
   id: string;
-  timestamp: number; // milliseconds from start of recording
+  timestamp: number; // seconds from start of recording (Groq format)
   text: string;
   speaker?: string; // e.g., "Speaker 1", "Speaker 2"
 }
