@@ -287,6 +287,10 @@ export default function HomeScreen() {
             // Track blob URL for cleanup after database save (web only)
             if (Platform.OS === 'web' && chunkUri.startsWith('blob:')) {
               blobUrlsToRevoke.push(chunkUri);
+              console.log(`[saveRecordingOnly] Tracked blob URL ${i + 1} for cleanup:`, redactUrl(chunkUri));
+            } else if (Platform.OS === 'web') {
+              // Verify non-blob URLs are expected
+              console.log(`[saveRecordingOnly] Chunk ${i + 1} is not a blob URL (OK):`, redactUrl(chunkUri));
             }
 
           } catch (error) {
@@ -325,7 +329,7 @@ export default function HomeScreen() {
 
       // Cleanup: Revoke blob URLs after successful save (web only)
       if (Platform.OS === 'web' && blobUrlsToRevoke.length > 0) {
-        console.log(`[saveRecordingOnly] Revoking ${blobUrlsToRevoke.length} blob URLs after save`);
+        console.log(`[saveRecordingOnly] Revoking ${blobUrlsToRevoke.length} blob URLs after save (tracked: ${blobUrlsToRevoke.length}/${chunksToUpload.length} chunks)`);
         blobUrlsToRevoke.forEach(url => {
           try {
             URL.revokeObjectURL(url);

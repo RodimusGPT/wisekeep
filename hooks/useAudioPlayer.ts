@@ -234,9 +234,14 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 
         for (let i = 0; i < audioChunks.length; i++) {
           // Use actual chunk duration if available, otherwise estimate equally
-          const chunkDuration = chunkDurations[i] > 0
-            ? chunkDurations[i]
-            : (totalRecordingDuration.current / audioChunks.length);
+          let chunkDuration: number;
+          if (chunkDurations[i] > 0) {
+            chunkDuration = chunkDurations[i];
+          } else {
+            // Fallback: assume equal-length chunks (may be inaccurate)
+            chunkDuration = totalRecordingDuration.current / audioChunks.length;
+            console.warn(`[AudioPlayer] Using fallback duration for chunk ${i + 1} (${chunkDuration.toFixed(1)}s) - seeking may be inaccurate`);
+          }
 
           if (targetPositionSec < accumulatedDuration + chunkDuration) {
             // Target is in this chunk
