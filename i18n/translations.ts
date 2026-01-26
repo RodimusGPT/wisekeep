@@ -163,6 +163,11 @@ export interface Translations {
   autoChunkErrorPreserved: string;
   pleaseLogin: string;
   processingTimeoutError: string;
+  saveErrorPrefix: string;
+  saveErrorRetry: string;
+  processingErrorPrefix: string;
+  processingErrorRetry: string;
+  unknownError: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -329,6 +334,11 @@ export const translations: Record<Language, Translations> = {
     autoChunkErrorPreserved: '自動分段時發生錯誤，錄音已停止。已保存的部分將被保留。',
     pleaseLogin: '請先登入',
     processingTimeoutError: '處理超時（2分鐘後無回應）。請稍後再試重新上傳。',
+    saveErrorPrefix: '儲存錯誤',
+    saveErrorRetry: '儲存過程中發生錯誤，請重試。',
+    processingErrorPrefix: '處理錯誤',
+    processingErrorRetry: '處理過程中發生錯誤，請重試。',
+    unknownError: '未知錯誤',
   },
 
   'en': {
@@ -494,5 +504,10 @@ export const translations: Record<Language, Translations> = {
     autoChunkErrorPreserved: 'Auto-chunking failed. Recording stopped. Previously saved portions preserved.',
     pleaseLogin: 'Please log in',
     processingTimeoutError: 'Processing timed out after 2 minutes. Please try uploading again.',
+    saveErrorPrefix: 'Save Error',
+    saveErrorRetry: 'Error saving recording. Please try again.',
+    processingErrorPrefix: 'Processing Error',
+    processingErrorRetry: 'Error processing recording. Please try again.',
+    unknownError: 'Unknown error',
   },
 };

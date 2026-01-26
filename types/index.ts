@@ -24,6 +24,10 @@ export interface Recording {
   // Chunks are created every 20 minutes to stay under 25MB Groq limit
   // But presented to user as one seamless recording
   audioChunks?: string[]; // Array of local file paths for each chunk
+
+  // Multi-part recording support (legacy - for recordings split into separate entries)
+  parentRecordingId?: string; // ID of parent recording if this is a part
+  partNumber?: number; // Sequential part number (1, 2, 3...)
 }
 
 export interface AppSettings {

@@ -205,7 +205,7 @@ export default function HomeScreen() {
       updateRecording(recordingId, {
         status: 'ready',
         notes: [{ id: '1', timestamp: 0, text: t.pleaseLogin }],
-        summary: ['尚未登入，請稍後重試。'],
+        summary: [t.pleaseLogin],
       });
       setProcessingId(null);
       return;
@@ -388,9 +388,9 @@ export default function HomeScreen() {
         notes: [{
           id: '1',
           timestamp: 0,
-          text: `儲存錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`,
+          text: `${t.saveErrorPrefix}: ${error instanceof Error ? error.message : t.unknownError}`,
         }],
-        summary: ['儲存過程中發生錯誤，請重試。'],
+        summary: [t.saveErrorRetry],
       });
       setProcessingId(null);
     }
@@ -407,7 +407,7 @@ export default function HomeScreen() {
       updateRecording(recordingId, {
         status: 'ready',
         notes: [{ id: '1', timestamp: 0, text: t.pleaseLogin }],
-        summary: ['尚未登入，請稍後重試。'],
+        summary: [t.pleaseLogin],
       });
       setProcessingId(null);
       return;
@@ -525,7 +525,7 @@ export default function HomeScreen() {
       const pollForUpdates = () => {
         const maxAttempts = 60; // Poll for up to 2 minutes (60 * 2 seconds)
         let attempts = 0;
-        const activeTimeouts: NodeJS.Timeout[] = []; // Track all timeouts for proper cleanup
+        const activeTimeouts: ReturnType<typeof setTimeout>[] = []; // Track all timeouts for proper cleanup
         let isCancelled = false;
 
         const checkStatus = async () => {
@@ -668,9 +668,9 @@ export default function HomeScreen() {
         notes: [{
           id: '1',
           timestamp: 0,
-          text: `處理錯誤: ${error instanceof Error ? error.message : '未知錯誤'}`,
+          text: `${t.processingErrorPrefix}: ${error instanceof Error ? error.message : t.unknownError}`,
         }],
-        summary: ['處理過程中發生錯誤，請重試。'],
+        summary: [t.processingErrorRetry],
       });
       setProcessingId(null);
     }

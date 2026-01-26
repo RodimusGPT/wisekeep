@@ -43,7 +43,7 @@ export function useRecording(): UseRecordingReturn {
   const webRecorderRef = useRef<WebMediaRecorder | null>(null);
   const webStreamRef = useRef<WebMediaStream | null>(null);
   const webChunksRef = useRef<Blob[]>([]);
-  const durationIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef<number>(0);
   const isMountedRef = useRef<boolean>(true); // Track component lifecycle for async callbacks
   const blobUrlsRef = useRef<Set<string>>(new Set()); // Track blob URLs for cleanup (web only)

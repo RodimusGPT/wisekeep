@@ -94,7 +94,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       pendingSeekPosition.current = null;
 
       console.log('[AudioPlayer] Applying pending seek to:', seekPos.toFixed(2), 'seconds');
-      player.seekTo(seekPos).then(() => {
+      player.seekTo(seekPos).then(async () => {
         // Guard against state update after unmount
         if (!isMountedRef.current) {
           console.log('[AudioPlayer] Component unmounted, skipping seek completion');
@@ -103,7 +103,11 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
         // After seeking, resume playback if needed
         if (wasPlayingBeforeChunkSwitch.current) {
           console.log('[AudioPlayer] Resuming playback after seek');
-          player.play();
+          try {
+            await player.play();
+          } catch (playError) {
+            console.error('[AudioPlayer] Play after seek failed:', playError);
+          }
           wasPlayingBeforeChunkSwitch.current = false;
         }
         isSwitchingChunks.current = false;
@@ -117,9 +121,15 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     } else if (wasPlayingBeforeChunkSwitch.current) {
       // No pending seek, just resume playback
       console.log('[AudioPlayer] Resuming playback on new chunk');
-      player.play();
-      wasPlayingBeforeChunkSwitch.current = false;
-      isSwitchingChunks.current = false;
+      (async () => {
+        try {
+          await player.play();
+        } catch (playError) {
+          console.error('[AudioPlayer] Play on new chunk failed:', playError);
+        }
+        wasPlayingBeforeChunkSwitch.current = false;
+        isSwitchingChunks.current = false;
+      })();
     } else if (isSwitchingChunks.current) {
       // Chunk loaded but not playing (manual chunk switch without playback)
       isSwitchingChunks.current = false;
@@ -212,7 +222,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       }
 
       console.log('[AudioPlayer] Playing...');
-      player.play();
+      await player.play();
     } catch (error) {
       console.error('[AudioPlayer] Failed to play:', error);
     }
@@ -222,7 +232,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     if (!player) return;
 
     try {
-      player.pause();
+      await player.pause();
     } catch (error) {
       console.error('[AudioPlayer] Failed to pause:', error);
     }

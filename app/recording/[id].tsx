@@ -69,7 +69,7 @@ export default function RecordingDetailScreen() {
   // Spinning animation for processing indicator
   const spinAnim = useRef(new Animated.Value(0)).current;
   const isMountedRef = useRef<boolean>(true);
-  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Cleanup on unmount
   useEffect(() => {
