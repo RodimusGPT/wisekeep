@@ -34,6 +34,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const wasPlayingBeforeChunkSwitch = useRef<boolean>(false);
   const isSwitchingChunks = useRef<boolean>(false); // Prevent race conditions during chunk switch
   const pendingSeekPosition = useRef<number | null>(null); // Store seek position during chunk load
+  const isMountedRef = useRef<boolean>(true); // Track component mount status
 
   // Use expo-audio's player hook with the current source
   const player = useExpoAudioPlayer(audioSource ? { uri: audioSource } : null);
@@ -94,6 +95,11 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 
       console.log('[AudioPlayer] Applying pending seek to:', seekPos.toFixed(2), 'seconds');
       player.seekTo(seekPos).then(() => {
+        // Guard against state update after unmount
+        if (!isMountedRef.current) {
+          console.log('[AudioPlayer] Component unmounted, skipping seek completion');
+          return;
+        }
         // After seeking, resume playback if needed
         if (wasPlayingBeforeChunkSwitch.current) {
           console.log('[AudioPlayer] Resuming playback after seek');
@@ -103,7 +109,10 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
         isSwitchingChunks.current = false;
       }).catch((error) => {
         console.error('[AudioPlayer] Seek error:', error);
-        isSwitchingChunks.current = false;
+        // Guard against state update after unmount
+        if (isMountedRef.current) {
+          isSwitchingChunks.current = false;
+        }
       });
     } else if (wasPlayingBeforeChunkSwitch.current) {
       // No pending seek, just resume playback
@@ -389,6 +398,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   useEffect(() => {
     return () => {
       console.log('[AudioPlayer] Component unmounting, clearing all state');
+      isMountedRef.current = false; // Mark component as unmounted
       // Clear all chunk switching state
       wasPlayingBeforeChunkSwitch.current = false;
       isSwitchingChunks.current = false;

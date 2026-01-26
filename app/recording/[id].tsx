@@ -68,6 +68,19 @@ export default function RecordingDetailScreen() {
 
   // Spinning animation for processing indicator
   const spinAnim = useRef(new Animated.Value(0)).current;
+  const isMountedRef = useRef<boolean>(true);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (isProcessing) {
@@ -242,9 +255,29 @@ export default function RecordingDetailScreen() {
     if (isCurrentlyProcessing) {
       setIsProcessing(true);
 
+      // Clear any existing interval before creating a new one
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+
       const pollInterval = setInterval(async () => {
+        // Guard against state update after unmount
+        if (!isMountedRef.current) {
+          console.log('[RecordingDetail] Component unmounted, stopping polling');
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          return;
+        }
+
         try {
           const dbRecording = await fetchRecordingById(id);
+
+          // Check again after async operation
+          if (!isMountedRef.current) return;
+
           if (dbRecording) {
             updateRecording(id, {
               status: dbRecording.status as any,
@@ -255,7 +288,10 @@ export default function RecordingDetailScreen() {
             // Stop polling if processing is complete
             if (dbRecording.status === 'ready' || dbRecording.status === 'notes_ready' || dbRecording.status === 'error') {
               setIsProcessing(false);
-              clearInterval(pollInterval);
+              if (pollingIntervalRef.current) {
+                clearInterval(pollingIntervalRef.current);
+                pollingIntervalRef.current = null;
+              }
             }
           }
         } catch (error) {
@@ -263,9 +299,22 @@ export default function RecordingDetailScreen() {
         }
       }, 2000);
 
-      return () => clearInterval(pollInterval);
+      // Store interval in ref
+      pollingIntervalRef.current = pollInterval;
+
+      return () => {
+        if (pollingIntervalRef.current) {
+          clearInterval(pollingIntervalRef.current);
+          pollingIntervalRef.current = null;
+        }
+      };
     } else {
       setIsProcessing(false);
+      // Clear interval if status is not processing
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
     }
   }, [recording?.status, id]);
 

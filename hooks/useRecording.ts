@@ -282,6 +282,7 @@ export function useRecording(): UseRecordingReturn {
     } catch (error) {
       console.error('[useRecording] Auto-chunk error:', error);
       isAutoChunking.current = false;
+      autoChunkPromise.current = null; // Reset promise ref to prevent inconsistency
 
       // On error, stop recording completely and preserve what we have
       setIsRecording(false);

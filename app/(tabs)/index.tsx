@@ -540,6 +540,9 @@ export default function HomeScreen() {
               // Guard against state update after unmount
               if (isCancelled) return;
 
+              // Double-check before state update (defensive programming)
+              if (isCancelled) return;
+
               // Update local state with validated database values
               updateRecording(recordingId, {
                 status: dbRecording.status,
@@ -567,6 +570,8 @@ export default function HomeScreen() {
             } else {
               console.log('Polling timeout - stopping');
               if (!isCancelled) {
+                // Double-check before state update
+                if (isCancelled) return;
                 // Update recording status to show timeout
                 updateRecording(recordingId, {
                   status: 'error',
@@ -585,6 +590,8 @@ export default function HomeScreen() {
               const timeoutId = setTimeout(checkStatus, 2000);
               activeTimeouts.push(timeoutId);
             } else if (!isCancelled) {
+              // Double-check before state update
+              if (isCancelled) return;
               // Update recording status to show polling error
               updateRecording(recordingId, {
                 status: 'error',
