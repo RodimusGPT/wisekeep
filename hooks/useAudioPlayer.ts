@@ -31,6 +31,8 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const [chunkDurations, setChunkDurations] = useState<number[]>([]);
   const totalRecordingDuration = useRef<number>(0); // From Recording.duration
   const wasPlayingBeforeChunkSwitch = useRef<boolean>(false);
+  const isSwitchingChunks = useRef<boolean>(false); // Prevent race conditions during chunk switch
+  const pendingSeekPosition = useRef<number | null>(null); // Store seek position during chunk load
 
   // Use expo-audio's player hook with the current source
   const player = useExpoAudioPlayer(audioSource ? { uri: audioSource } : null);
@@ -47,7 +49,7 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 
   // Auto-play next chunk when current chunk finishes
   useEffect(() => {
-    if (!player || !isLoaded || audioChunks.length === 0) return;
+    if (!player || !isLoaded || audioChunks.length === 0 || isSwitchingChunks.current) return;
 
     // Check if current chunk has finished playing
     const currentChunkDuration = status.duration || 0;
@@ -55,9 +57,11 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     const isPlaying = status.playing || false;
 
     // If chunk finished and there are more chunks, play next one
-    if (currentPosition >= currentChunkDuration - 0.1 && currentChunkIndex < audioChunks.length - 1 && isPlaying) {
+    // Use 0.2s buffer to catch the end reliably
+    if (currentPosition >= currentChunkDuration - 0.2 && currentChunkIndex < audioChunks.length - 1 && isPlaying) {
       console.log(`[AudioPlayer] Chunk ${currentChunkIndex + 1} finished, loading next chunk...`);
       wasPlayingBeforeChunkSwitch.current = true;
+      isSwitchingChunks.current = true;
 
       // Move to next chunk
       setCurrentChunkIndex(prev => prev + 1);
@@ -74,12 +78,37 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     setAudioSource(chunkUri);
   }, [currentChunkIndex, audioChunks]);
 
-  // Resume playing after chunk loads
+  // Resume playing and handle pending seeks after chunk loads
   useEffect(() => {
-    if (wasPlayingBeforeChunkSwitch.current && isLoaded && player) {
+    if (!isLoaded || !player) return;
+
+    // Handle pending seek first (if user seeked during chunk switch)
+    if (pendingSeekPosition.current !== null) {
+      const seekPos = pendingSeekPosition.current;
+      pendingSeekPosition.current = null;
+
+      console.log('[AudioPlayer] Applying pending seek to:', seekPos.toFixed(2), 'seconds');
+      player.seekTo(seekPos).then(() => {
+        // After seeking, resume playback if needed
+        if (wasPlayingBeforeChunkSwitch.current) {
+          console.log('[AudioPlayer] Resuming playback after seek');
+          player.play();
+          wasPlayingBeforeChunkSwitch.current = false;
+        }
+        isSwitchingChunks.current = false;
+      }).catch((error) => {
+        console.error('[AudioPlayer] Seek error:', error);
+        isSwitchingChunks.current = false;
+      });
+    } else if (wasPlayingBeforeChunkSwitch.current) {
+      // No pending seek, just resume playback
       console.log('[AudioPlayer] Resuming playback on new chunk');
       player.play();
       wasPlayingBeforeChunkSwitch.current = false;
+      isSwitchingChunks.current = false;
+    } else if (isSwitchingChunks.current) {
+      // Chunk loaded but not playing (manual chunk switch without playback)
+      isSwitchingChunks.current = false;
     }
   }, [isLoaded, player]);
 
@@ -190,7 +219,10 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
         let accumulatedDuration = 0;
 
         for (let i = 0; i < audioChunks.length; i++) {
-          const chunkDuration = chunkDurations[i] || (totalRecordingDuration.current / audioChunks.length);
+          // Use actual chunk duration if available, otherwise estimate equally
+          const chunkDuration = chunkDurations[i] > 0
+            ? chunkDurations[i]
+            : (totalRecordingDuration.current / audioChunks.length);
 
           if (targetPositionSec < accumulatedDuration + chunkDuration) {
             // Target is in this chunk
@@ -199,18 +231,19 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
 
             // Switch to this chunk if needed
             if (i !== currentChunkIndex) {
+              // Save playback state and position for after chunk loads
               wasPlayingBeforeChunkSwitch.current = status.playing || false;
-              setCurrentChunkIndex(i);
+              pendingSeekPosition.current = positionInChunk;
+              isSwitchingChunks.current = true;
 
-              // Wait for chunk to load, then seek
-              // The seek will happen in the useEffect that resumes playback
-              setTimeout(async () => {
-                if (player && isLoaded) {
-                  await player.seekTo(positionInChunk);
-                }
-              }, 100);
+              // Switch chunk - the seek will happen in the load effect
+              setCurrentChunkIndex(i);
             } else {
-              // Same chunk, just seek
+              // Same chunk, just seek immediately
+              if (!isLoaded) {
+                console.log('[AudioPlayer] Cannot seek - chunk not loaded yet');
+                return;
+              }
               await player.seekTo(positionInChunk);
             }
             return;
@@ -220,15 +253,22 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
         }
 
         // If we got here, target is beyond last chunk - seek to end of last chunk
-        const lastChunkDuration = chunkDurations[audioChunks.length - 1] || 0;
+        const lastChunkDuration = chunkDurations[audioChunks.length - 1] > 0
+          ? chunkDurations[audioChunks.length - 1]
+          : (totalRecordingDuration.current / audioChunks.length);
+
         if (currentChunkIndex !== audioChunks.length - 1) {
+          // Switch to last chunk and seek to its end
+          wasPlayingBeforeChunkSwitch.current = status.playing || false;
+          pendingSeekPosition.current = lastChunkDuration;
+          isSwitchingChunks.current = true;
           setCurrentChunkIndex(audioChunks.length - 1);
-          setTimeout(async () => {
-            if (player && isLoaded) {
-              await player.seekTo(lastChunkDuration);
-            }
-          }, 100);
         } else {
+          // Already on last chunk, just seek
+          if (!isLoaded) {
+            console.log('[AudioPlayer] Cannot seek - chunk not loaded yet');
+            return;
+          }
           await player.seekTo(lastChunkDuration);
         }
       } else {

@@ -15,7 +15,7 @@ export interface Database {
           created_at: string;
           duration: number;
           audio_url: string;
-          status: 'processing_notes' | 'processing_summary' | 'ready' | 'error';
+          status: 'recorded' | 'processing_notes' | 'processing_summary' | 'ready' | 'error';
           notes: Json | null;
           summary: Json | null;
           language: string | null;
@@ -27,7 +27,7 @@ export interface Database {
           created_at?: string;
           duration: number;
           audio_url: string;
-          status?: 'processing_notes' | 'processing_summary' | 'ready' | 'error';
+          status?: 'recorded' | 'processing_notes' | 'processing_summary' | 'ready' | 'error';
           notes?: Json | null;
           summary?: Json | null;
           language?: string | null;
@@ -39,7 +39,7 @@ export interface Database {
           created_at?: string;
           duration?: number;
           audio_url?: string;
-          status?: 'processing_notes' | 'processing_summary' | 'ready' | 'error';
+          status?: 'recorded' | 'processing_notes' | 'processing_summary' | 'ready' | 'error';
           notes?: Json | null;
           summary?: Json | null;
           language?: string | null;

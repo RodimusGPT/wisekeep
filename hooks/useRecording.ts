@@ -66,13 +66,19 @@ export function useRecording(): UseRecordingReturn {
     const chunkDuration = getChunkDuration(userTier);
     const canAutoChunk = allowsMultiPart(userTier);
 
-    // Check if we've reached the chunk duration (with small buffer to prevent multiple triggers)
-    if (duration >= chunkDuration && duration < chunkDuration + 2) {
+    // Check if we've reached the chunk duration (with larger buffer to prevent missing the trigger)
+    // Use >= chunkDuration - 0.5 to catch it even if timer lags slightly
+    if (duration >= chunkDuration - 0.5 && duration < chunkDuration + 5) {
       if (canAutoChunk) {
         // VIP: Auto-save chunk and continue recording (invisible to user)
         console.log(`[useRecording] Auto-chunking triggered at ${duration}s, total chunks: ${audioChunksRef.current.length + 1}`);
+        // Set flag BEFORE calling to prevent multiple triggers
         isAutoChunking.current = true;
-        handleAutoChunk();
+        handleAutoChunk().catch((error) => {
+          console.error('[useRecording] Auto-chunk failed:', error);
+          isAutoChunking.current = false;
+          // Don't stop recording on auto-chunk failure, just log it
+        });
       } else {
         // Normal users: Hard stop at limit
         console.log(`[useRecording] Recording limit reached at ${duration}s, stopping...`);
@@ -89,36 +95,55 @@ export function useRecording(): UseRecordingReturn {
 
   // Handle auto-chunking for VIP users (invisible to user)
   const handleAutoChunk = useCallback(async () => {
-    try {
-      const chunkIndex = audioChunksRef.current.length;
-      console.log(`[useRecording] Saving chunk ${chunkIndex + 1}...`);
+    const chunkIndex = audioChunksRef.current.length;
+    console.log(`[useRecording] Saving chunk ${chunkIndex + 1}...`);
 
+    try {
       // Calculate chunk duration
       const chunkDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
       totalDurationRef.current += chunkDuration;
 
       if (Platform.OS === 'web') {
-        // Web: Stop MediaRecorder, save blob, restart
-        if (!webRecorderRef.current) {
-          throw new Error('No web recorder');
+        // Web: Save current blob, clear for next segment
+        if (!webRecorderRef.current || !webRecorderRef.current.state || webRecorderRef.current.state === 'inactive') {
+          throw new Error('Web recorder not active');
+        }
+
+        // Validate we have data
+        if (webChunksRef.current.length === 0) {
+          throw new Error('No audio data in current chunk');
         }
 
         // Create blob from current chunks
         const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
+        if (blob.size === 0) {
+          throw new Error('Created blob has zero size');
+        }
+
         const chunkUri = URL.createObjectURL(blob);
         audioChunksRef.current.push(chunkUri);
 
         // Clear chunks for next segment
         webChunksRef.current = [];
 
-        console.log(`[useRecording] Chunk ${chunkIndex + 1} saved (web), total duration: ${totalDurationRef.current}s`);
+        console.log(`[useRecording] Chunk ${chunkIndex + 1} saved (web, ${blob.size} bytes), total duration: ${totalDurationRef.current}s`);
       } else {
         // Native: Stop recorder, move file to chunk location, restart
+        if (!recorder || !recorder.isRecording) {
+          throw new Error('Recorder not in recording state');
+        }
+
         await recorder.stop();
 
         const uri = recorder.uri;
         if (!uri) {
-          throw new Error('No recording URI');
+          throw new Error('No recording URI after stop');
+        }
+
+        // Verify file exists before moving
+        const fileInfo = await FileSystem.getInfoAsync(uri);
+        if (!fileInfo.exists) {
+          throw new Error(`Recording file does not exist: ${uri}`);
         }
 
         // Move to chunk file location
@@ -130,10 +155,15 @@ export function useRecording(): UseRecordingReturn {
           { intermediates: true }
         ).catch(() => {}); // Ignore if exists
 
-        await FileSystem.moveAsync({
-          from: uri,
-          to: chunkPath,
-        });
+        try {
+          await FileSystem.moveAsync({
+            from: uri,
+            to: chunkPath,
+          });
+        } catch (moveError) {
+          console.error('[useRecording] Failed to move chunk file:', moveError);
+          throw new Error(`Failed to move chunk file: ${moveError}`);
+        }
 
         audioChunksRef.current.push(chunkPath);
         console.log(`[useRecording] Chunk ${chunkIndex + 1} saved to ${chunkPath}, total duration: ${totalDurationRef.current}s`);
@@ -141,12 +171,18 @@ export function useRecording(): UseRecordingReturn {
         // Restart recorder
         await recorder.prepareToRecordAsync();
         recorder.record();
+
+        // Verify recorder restarted
+        if (!recorder.isRecording) {
+          throw new Error('Failed to restart recorder after chunk');
+        }
       }
 
       // Reset duration timer for next chunk
       startTimeRef.current = Date.now();
       setDuration(0);
 
+      // Only clear flag after successful completion
       isAutoChunking.current = false;
       console.log(`[useRecording] Auto-chunk complete, continuing recording...`);
 
@@ -154,9 +190,22 @@ export function useRecording(): UseRecordingReturn {
       console.error('[useRecording] Auto-chunk error:', error);
       isAutoChunking.current = false;
 
-      // On error, stop recording completely
+      // On error, stop recording completely and preserve what we have
       setIsRecording(false);
-      Alert.alert('錄音錯誤', '自動分段失敗，錄音已停止。');
+
+      // Clear timer
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
+      }
+
+      Alert.alert(
+        '錄音錯誤',
+        '自動分段時發生錯誤，錄音已停止。已保存的部分將被保留。',
+        [{ text: '確定' }]
+      );
+
+      throw error; // Re-throw for caller to handle
     }
   }, []);
 
@@ -540,20 +589,67 @@ export function useRecording(): UseRecordingReturn {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
+      console.log('[useRecording] Component unmounting, cleaning up...');
+
+      // Clear duration timer
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
+        durationIntervalRef.current = null;
       }
+
       // Web cleanup
-      if (webRecorderRef.current && webRecorderRef.current.state !== 'inactive') {
-        webRecorderRef.current.stop();
+      if (Platform.OS === 'web') {
+        // Stop recorder
+        if (webRecorderRef.current && webRecorderRef.current.state !== 'inactive') {
+          try {
+            webRecorderRef.current.stop();
+          } catch (e) {
+            console.warn('[useRecording] Error stopping web recorder:', e);
+          }
+        }
+
+        // Stop media stream
+        if (webStreamRef.current) {
+          webStreamRef.current.getTracks().forEach(track => {
+            try {
+              track.stop();
+            } catch (e) {
+              console.warn('[useRecording] Error stopping track:', e);
+            }
+          });
+        }
+
+        // Revoke blob URLs to prevent memory leaks
+        audioChunksRef.current.forEach(uri => {
+          try {
+            if (uri.startsWith('blob:')) {
+              URL.revokeObjectURL(uri);
+            }
+          } catch (e) {
+            console.warn('[useRecording] Error revoking blob URL:', e);
+          }
+        });
       }
-      if (webStreamRef.current) {
-        webStreamRef.current.getTracks().forEach(track => track.stop());
+
+      // Native cleanup - check actual recorder state, not component state
+      if (Platform.OS !== 'web' && recorder) {
+        if (recorder.isRecording) {
+          recorder.stop().catch((e) => {
+            console.warn('[useRecording] Error stopping recorder on cleanup:', e);
+          });
+        }
       }
-      // Native cleanup
-      if (recorder && isRecording) {
-        recorder.stop().catch(console.error);
-      }
+
+      // Clear all refs to prevent memory leaks and state corruption
+      audioChunksRef.current = [];
+      totalDurationRef.current = 0;
+      recordingIdRef.current = null;
+      isAutoChunking.current = false;
+      webChunksRef.current = [];
+      webRecorderRef.current = null;
+      webStreamRef.current = null;
+
+      console.log('[useRecording] Cleanup complete');
     };
   }, []);
 

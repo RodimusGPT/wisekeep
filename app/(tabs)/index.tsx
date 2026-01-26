@@ -173,49 +173,97 @@ export default function HomeScreen() {
     }
 
     try {
-      // Step 1 & 2: Upload all audio chunks
+      // Step 1 & 2: Upload all audio chunks with retry logic
       const chunksToUpload = audioChunks && audioChunks.length > 0 ? audioChunks : [audioUri];
       console.log(`[saveRecordingOnly] Uploading ${chunksToUpload.length} chunk(s)...`);
 
       const allUploadedChunks: Array<{ url: string; startTime: number; endTime: number; index: number }> = [];
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY = 1000; // ms
 
       for (let i = 0; i < chunksToUpload.length; i++) {
         const chunkUri = chunksToUpload[i];
         console.log(`[saveRecordingOnly] Uploading chunk ${i + 1}/${chunksToUpload.length} from:`, chunkUri);
 
-        // Read audio chunk
-        let audioData: Blob | string;
+        let lastError: Error | null = null;
+        let uploadSuccess = false;
 
-        if (Platform.OS === 'web') {
-          const response = await fetch(chunkUri);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch chunk ${i + 1}: ${response.status}`);
+        // Retry loop for each chunk
+        for (let attempt = 0; attempt < MAX_RETRIES && !uploadSuccess; attempt++) {
+          try {
+            if (attempt > 0) {
+              console.log(`[saveRecordingOnly] Retry attempt ${attempt + 1}/${MAX_RETRIES} for chunk ${i + 1}`);
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * attempt));
+            }
+
+            // Read audio chunk
+            let audioData: Blob | string;
+
+            if (Platform.OS === 'web') {
+              const response = await fetch(chunkUri);
+              if (!response.ok) {
+                throw new Error(`Failed to fetch chunk ${i + 1}: ${response.status}`);
+              }
+              audioData = await response.blob();
+
+              // Validate blob has data
+              if (audioData.size === 0) {
+                throw new Error(`Chunk ${i + 1} blob is empty`);
+              }
+
+              console.log(`[saveRecordingOnly] Chunk ${i + 1} blob size:`, audioData.size);
+            } else {
+              const file = new ExpoFile(chunkUri);
+
+              // Check file exists
+              if (!file.exists) {
+                throw new Error(`Chunk ${i + 1} file does not exist at ${chunkUri}`);
+              }
+
+              // Check file size
+              if (file.size === 0) {
+                throw new Error(`Chunk ${i + 1} file is empty`);
+              }
+
+              console.log(`[saveRecordingOnly] Chunk ${i + 1} file size:`, file.size);
+
+              // Read file data
+              try {
+                audioData = await file.base64();
+              } catch (readError) {
+                throw new Error(`Failed to read chunk ${i + 1} file: ${readError}`);
+              }
+            }
+
+            // Upload chunk (note: uploadAudioChunked may further split large chunks)
+            const { chunks } = await uploadAudioChunked(
+              user.authUserId,
+              `${recordingId}_part${i}`,
+              audioData,
+              durationSeconds
+            );
+
+            // Validate upload returned data
+            if (!chunks || chunks.length === 0) {
+              throw new Error(`Upload returned no chunks for part ${i + 1}`);
+            }
+
+            // Add all sub-chunks from this part
+            allUploadedChunks.push(...chunks);
+            console.log(`[saveRecordingOnly] Chunk ${i + 1} uploaded: ${chunks.length} sub-chunk(s)`);
+
+            uploadSuccess = true;
+
+          } catch (error) {
+            lastError = error as Error;
+            console.error(`[saveRecordingOnly] Chunk ${i + 1} upload attempt ${attempt + 1} failed:`, error);
+
+            // If this was the last attempt, throw the error
+            if (attempt === MAX_RETRIES - 1) {
+              throw new Error(`Failed to upload chunk ${i + 1} after ${MAX_RETRIES} attempts: ${lastError.message}`);
+            }
           }
-          audioData = await response.blob();
-          console.log(`[saveRecordingOnly] Chunk ${i + 1} blob size:`, audioData.size);
-        } else {
-          const file = new ExpoFile(chunkUri);
-          if (!file.exists) {
-            throw new Error(`Chunk ${i + 1} file does not exist`);
-          }
-          if (file.size === 0) {
-            throw new Error(`Chunk ${i + 1} file is empty`);
-          }
-          console.log(`[saveRecordingOnly] Chunk ${i + 1} file size:`, file.size);
-          audioData = await file.base64();
         }
-
-        // Upload chunk (note: uploadAudioChunked may further split large chunks)
-        const { chunks } = await uploadAudioChunked(
-          user.authUserId,
-          `${recordingId}_part${i}`,
-          audioData,
-          durationSeconds
-        );
-
-        // Add all sub-chunks from this part
-        allUploadedChunks.push(...chunks);
-        console.log(`[saveRecordingOnly] Chunk ${i + 1} uploaded: ${chunks.length} sub-chunk(s)`);
       }
 
       console.log(`[saveRecordingOnly] All uploads complete: ${allUploadedChunks.length} total chunk(s)`);
