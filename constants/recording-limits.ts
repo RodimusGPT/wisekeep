@@ -7,7 +7,7 @@ const DEV_CHUNK_DURATION = 30; // seconds - for testing auto-chunk
 const PROD_CHUNK_DURATION = 20 * 60; // 20 minutes - for production
 
 // Toggle this for testing vs production
-const USE_DEV_DURATION = true;
+const USE_DEV_DURATION = false; // Set to false for production
 
 const CHUNK_DURATION = USE_DEV_DURATION ? DEV_CHUNK_DURATION : PROD_CHUNK_DURATION;
 

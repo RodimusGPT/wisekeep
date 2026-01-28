@@ -140,23 +140,6 @@ export function useRecording(): UseRecordingReturn {
     return duration >= chunkDuration - 0.5 && duration <= chunkDuration + 0.5;
   }, [isRecording, user, duration]);
 
-  // DEV: Debug alert when recording starts to confirm build has latest code
-  const hasShownDebugRef = useRef(false);
-  useEffect(() => {
-    if (isRecording && !hasShownDebugRef.current && user) {
-      hasShownDebugRef.current = true;
-      const userTier = user.tier || 'free';
-      const chunkDuration = getChunkDuration(userTier);
-      const canAutoChunk = allowsMultiPart(userTier);
-      Alert.alert(
-        'DEV BUILD 44',
-        `Tier: ${userTier}\nChunk at: ${chunkDuration}s\nAuto-chunk: ${canAutoChunk ? 'YES' : 'NO'}`
-      );
-    }
-    if (!isRecording) {
-      hasShownDebugRef.current = false;
-    }
-  }, [isRecording, user]);
 
   // Auto-chunk or stop recording based on duration and tier
   useEffect(() => {
@@ -346,12 +329,7 @@ export function useRecording(): UseRecordingReturn {
             setDuration(0);
             isAutoChunking.current = false;
             setIsChunking(false);
-            setChunkCount(prev => {
-              const newCount = prev + 1;
-              // DEV: Show alert to confirm chunk saved (remove for production)
-              Alert.alert('Chunk Saved', `Chunk ${newCount} saved successfully. Recording continues.`);
-              return newCount;
-            });
+            setChunkCount(prev => prev + 1);
             return; // Success - recording continues
           }
         } catch (restartError) {
