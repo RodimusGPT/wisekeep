@@ -757,296 +757,130 @@ async function transcribeBlobDirect(
 }
 
 // ============================================
-// Google Cloud Storage Helpers
+// AssemblyAI Transcription (for large files)
 // ============================================
 
-// Base64URL encode (for JWT)
-function base64UrlEncode(data: string): string {
-  return btoa(data).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-}
-
-// Create a signed JWT for GCS authentication
-async function createGcsJwt(serviceAccount: { client_email: string; private_key: string }): Promise<string> {
-  const header = { alg: 'RS256', typ: 'JWT' };
-  const now = Math.floor(Date.now() / 1000);
-  const payload = {
-    iss: serviceAccount.client_email,
-    scope: 'https://www.googleapis.com/auth/cloud-platform',
-    aud: 'https://oauth2.googleapis.com/token',
-    iat: now,
-    exp: now + 3600,
-  };
-
-  const headerB64 = base64UrlEncode(JSON.stringify(header));
-  const payloadB64 = base64UrlEncode(JSON.stringify(payload));
-  const unsignedToken = `${headerB64}.${payloadB64}`;
-
-  // Import private key and sign
-  const pemContents = serviceAccount.private_key
-    .replace(/-----BEGIN PRIVATE KEY-----/, '')
-    .replace(/-----END PRIVATE KEY-----/, '')
-    .replace(/\n/g, '');
-  const binaryKey = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
-
-  const cryptoKey = await crypto.subtle.importKey(
-    'pkcs8',
-    binaryKey,
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['sign']
-  );
-
-  const signature = await crypto.subtle.sign(
-    'RSASSA-PKCS1-v1_5',
-    cryptoKey,
-    new TextEncoder().encode(unsignedToken)
-  );
-
-  const signatureB64 = base64UrlEncode(String.fromCharCode(...new Uint8Array(signature)));
-  return `${unsignedToken}.${signatureB64}`;
-}
-
-// Get GCS access token from service account
-async function getGcsAccessToken(): Promise<string> {
-  const serviceAccountJson = Deno.env.get("GCS_SERVICE_ACCOUNT_KEY");
-  if (!serviceAccountJson) {
-    throw new Error("GCS_SERVICE_ACCOUNT_KEY not configured");
-  }
-
-  const serviceAccount = JSON.parse(serviceAccountJson);
-  const jwt = await createGcsJwt(serviceAccount);
-
-  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
-  });
-
-  if (!tokenResponse.ok) {
-    const error = await tokenResponse.text();
-    throw new Error(`Failed to get GCS access token: ${error}`);
-  }
-
-  const tokenData = await tokenResponse.json();
-  return tokenData.access_token;
-}
-
-// Upload file to GCS and return gs:// URI
-// Makes file publicly readable so Google STT can access it
-async function uploadToGcs(audioData: ArrayBuffer, fileName: string): Promise<string> {
-  const bucketName = Deno.env.get("GCS_BUCKET_NAME");
-  if (!bucketName) {
-    throw new Error("GCS_BUCKET_NAME not configured");
-  }
-
-  const accessToken = await getGcsAccessToken();
-
-  console.log(`[GCS] Uploading ${(audioData.byteLength / 1024 / 1024).toFixed(2)}MB to gs://${bucketName}/${fileName}`);
-
-  // Upload with predefinedAcl=publicRead so Google STT can access it
-  const uploadResponse = await fetch(
-    `https://storage.googleapis.com/upload/storage/v1/b/${bucketName}/o?uploadType=media&name=${encodeURIComponent(fileName)}&predefinedAcl=publicRead`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${accessToken}`,
-        'Content-Type': 'audio/mp4',
-      },
-      body: audioData,
-    }
-  );
-
-  if (!uploadResponse.ok) {
-    const error = await uploadResponse.text();
-    throw new Error(`Failed to upload to GCS: ${error}`);
-  }
-
-  console.log(`[GCS] Upload complete`);
-  return `gs://${bucketName}/${fileName}`;
-}
-
-// Delete file from GCS
-async function deleteFromGcs(fileName: string): Promise<void> {
-  const bucketName = Deno.env.get("GCS_BUCKET_NAME");
-  if (!bucketName) return;
-
-  try {
-    const accessToken = await getGcsAccessToken();
-
-    const deleteResponse = await fetch(
-      `https://storage.googleapis.com/storage/v1/b/${bucketName}/o/${encodeURIComponent(fileName)}`,
-      {
-        method: 'DELETE',
-        headers: { 'Authorization': `Bearer ${accessToken}` },
-      }
-    );
-
-    if (deleteResponse.ok) {
-      console.log(`[GCS] Deleted ${fileName}`);
-    } else {
-      console.warn(`[GCS] Failed to delete ${fileName}: ${deleteResponse.status}`);
-    }
-  } catch (error) {
-    console.warn(`[GCS] Error deleting file: ${error}`);
-  }
-}
-
-// ============================================
-// Google Cloud Speech-to-Text
-// ============================================
-
-// Transcribe using Google Cloud Speech-to-Text async (for large files)
-// Uploads to GCS temporarily, transcribes, then deletes
-async function transcribeWithGoogleSTT(
+// Transcribe using AssemblyAI (supports M4A, accepts HTTP URLs directly)
+async function transcribeWithAssemblyAI(
   audioUrl: string,
   language: string
 ): Promise<TranscriptionResult> {
-  const googleApiKey = Deno.env.get("GOOGLE_CLOUD_STT_API_KEY");
-  if (!googleApiKey) {
-    throw new Error("GOOGLE_CLOUD_STT_API_KEY not configured");
+  const apiKey = Deno.env.get("ASSEMBLYAI_API_KEY");
+  if (!apiKey) {
+    throw new Error("ASSEMBLYAI_API_KEY not configured");
   }
 
-  console.log(`[Google STT] Starting transcription for: ${audioUrl.substring(0, 80)}...`);
+  console.log(`[AssemblyAI] Starting transcription for: ${audioUrl.substring(0, 80)}...`);
 
-  // Download audio from Supabase
-  console.log(`[Google STT] Downloading audio...`);
-  const audioResponse = await fetch(audioUrl);
-  if (!audioResponse.ok) {
-    throw new Error(`Failed to fetch audio for Google STT: ${audioResponse.status}`);
+  // Map language codes
+  const languageCode = language === "zh-TW" ? "zh" : language;
+
+  // Submit transcription job
+  const submitResponse = await fetch("https://api.assemblyai.com/v2/transcript", {
+    method: "POST",
+    headers: {
+      "Authorization": apiKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      audio_url: audioUrl,
+      language_code: languageCode,
+      punctuate: true,
+      format_text: true,
+    }),
+  });
+
+  if (!submitResponse.ok) {
+    const error = await submitResponse.text();
+    console.error(`[AssemblyAI] Submit error: ${submitResponse.status}, ${error}`);
+    throw new Error(`AssemblyAI submit error (${submitResponse.status}): ${error}`);
   }
 
-  const audioData = await audioResponse.arrayBuffer();
-  console.log(`[Google STT] Audio downloaded: ${(audioData.byteLength / 1024 / 1024).toFixed(2)}MB`);
+  const submitResult = await submitResponse.json();
+  const transcriptId = submitResult.id;
 
-  // Upload to GCS temporarily
-  const fileName = `temp-audio-${Date.now()}-${Math.random().toString(36).substring(7)}.m4a`;
-  const gcsUri = await uploadToGcs(audioData, fileName);
+  if (!transcriptId) {
+    throw new Error("AssemblyAI did not return transcript ID");
+  }
 
-  try {
-    // Start async transcription job with GCS URI
-    const startResponse = await fetch(
-      `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${googleApiKey}`,
+  console.log(`[AssemblyAI] Job submitted: ${transcriptId}`);
+
+  // Poll for completion
+  let attempts = 0;
+  const maxAttempts = 180; // 15 minutes max (5 second intervals)
+  let transcriptionResult: any = null;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+
+    // Wait 5 seconds between polls
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    const pollResponse = await fetch(
+      `https://api.assemblyai.com/v2/transcript/${transcriptId}`,
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          config: {
-            languageCode: language === "zh-TW" ? "zh-TW" : language,
-            enableAutomaticPunctuation: true,
-            enableWordTimeOffsets: true,
-            model: "latest_long",
-            useEnhanced: true,
-          },
-          audio: {
-            uri: gcsUri,
-          },
-        }),
+        headers: { "Authorization": apiKey },
       }
     );
 
-    if (!startResponse.ok) {
-      const errorText = await startResponse.text();
-      console.error(`[Google STT Error] Failed to start job: ${startResponse.status}, ${errorText}`);
-      throw new Error(`Google STT start error (${startResponse.status}): ${errorText}`);
+    if (!pollResponse.ok) {
+      console.error(`[AssemblyAI] Poll error: ${pollResponse.status}`);
+      continue;
     }
 
-    const startResult = await startResponse.json();
-    const operationName = startResult.name;
+    const pollResult = await pollResponse.json();
 
-    if (!operationName) {
-      throw new Error("Google STT did not return operation name");
-    }
-
-    console.log(`[Google STT] Job started: ${operationName}`);
-
-    // Poll for completion
-    let attempts = 0;
-    const maxAttempts = 120; // 10 minutes max (5 second intervals)
-    let completed = false;
-    let transcriptionResult: any = null;
-
-    while (!completed && attempts < maxAttempts) {
-      attempts++;
-
-      // Wait 5 seconds between polls
-      await new Promise(resolve => setTimeout(resolve, 5000));
-
-      const pollResponse = await fetch(
-        `https://speech.googleapis.com/v1/operations/${operationName}?key=${googleApiKey}`
-      );
-
-      if (!pollResponse.ok) {
-        console.error(`[Google STT] Poll error: ${pollResponse.status}`);
-        continue; // Retry
+    if (pollResult.status === "completed") {
+      transcriptionResult = pollResult;
+      console.log(`[AssemblyAI] Job completed after ${attempts * 5}s`);
+      break;
+    } else if (pollResult.status === "error") {
+      throw new Error(`AssemblyAI transcription error: ${pollResult.error}`);
+    } else {
+      if (attempts % 6 === 0) {
+        console.log(`[AssemblyAI] Status: ${pollResult.status} (${attempts * 5}s elapsed)`);
       }
+    }
+  }
 
-      const pollResult = await pollResponse.json();
+  if (!transcriptionResult) {
+    throw new Error("AssemblyAI transcription timeout after 15 minutes");
+  }
 
-      if (pollResult.done) {
-        completed = true;
+  // Convert AssemblyAI format to our format
+  const fullText = transcriptionResult.text || "";
 
-        if (pollResult.error) {
-          throw new Error(`Google STT transcription error: ${JSON.stringify(pollResult.error)}`);
-        }
+  // Convert words to segments (group by ~200 chars or 2+ second gaps)
+  const segments: TranscriptionSegment[] = [];
+  const words = transcriptionResult.words || [];
 
-        transcriptionResult = pollResult.response;
-        console.log(`[Google STT] Job completed after ${attempts * 5}s`);
+  if (words.length > 0) {
+    let currentSegment = { start: words[0].start / 1000, end: 0, text: "" };
+
+    for (const word of words) {
+      const startTime = word.start / 1000; // Convert ms to seconds
+      const endTime = word.end / 1000;
+
+      // Start new segment if gap > 2 seconds or text gets too long
+      if (currentSegment.text &&
+          (startTime - currentSegment.end > 2 || currentSegment.text.length > 200)) {
+        segments.push({ ...currentSegment });
+        currentSegment = { start: startTime, end: endTime, text: word.text };
       } else {
-        if (attempts % 6 === 0) { // Log every 30 seconds
-          console.log(`[Google STT] Still processing... (${attempts * 5}s elapsed)`);
-        }
+        currentSegment.end = endTime;
+        currentSegment.text += (currentSegment.text ? " " : "") + word.text;
       }
     }
-
-    if (!completed) {
-      throw new Error("Google STT transcription timeout after 10 minutes");
-    }
-
-    // Convert Google STT format to our format
-    const fullText = transcriptionResult.results
-      ?.map((r: any) => r.alternatives?.[0]?.transcript || "")
-      .join(" ") || "";
-
-    // Convert word timings to segments
-    const segments: TranscriptionSegment[] = [];
-    let currentSegment = { start: 0, end: 0, text: "" };
-
-    transcriptionResult.results?.forEach((r: any) => {
-      const alternative = r.alternatives?.[0];
-      if (alternative?.words) {
-        alternative.words.forEach((word: any) => {
-          const startTime = parseFloat(word.startTime?.replace('s', '') || '0');
-          const endTime = parseFloat(word.endTime?.replace('s', '') || '0');
-
-          // Start new segment if gap > 2 seconds or text gets too long
-          if (currentSegment.text &&
-              (startTime - currentSegment.end > 2 || currentSegment.text.length > 200)) {
-            segments.push({ ...currentSegment });
-            currentSegment = { start: startTime, end: endTime, text: word.word };
-          } else {
-            if (!currentSegment.text) {
-              currentSegment.start = startTime;
-            }
-            currentSegment.end = endTime;
-            currentSegment.text += (currentSegment.text ? " " : "") + word.word;
-          }
-        });
-      }
-    });
 
     // Push final segment
     if (currentSegment.text) {
       segments.push(currentSegment);
     }
-
-    console.log(`[Google STT] Transcription complete: ${fullText.length} chars, ${segments.length} segments`);
-
-    return { text: fullText, segments };
-
-  } finally {
-    // Always clean up GCS file, even on error
-    await deleteFromGcs(fileName);
   }
+
+  console.log(`[AssemblyAI] Transcription complete: ${fullText.length} chars, ${segments.length} segments`);
+
+  return { text: fullText, segments };
 }
 
 // Transcribe audio using Groq Whisper
@@ -1107,7 +941,7 @@ async function transcribeAllChunks(
   const allNotes: NoteItem[] = [];
   let noteId = 1;
   const isTraditionalChinese = language === "zh-TW";
-  const hasGoogleSTTKey = !!Deno.env.get("GOOGLE_CLOUD_STT_API_KEY");
+  const hasAssemblyAIKey = !!Deno.env.get("ASSEMBLYAI_API_KEY");
 
   // With the new no-chunking approach, we should only have 1 chunk (the full file)
   if (chunks.length !== 1) {
@@ -1128,31 +962,32 @@ async function transcribeAllChunks(
   console.log(`[Transcription] File size: ${fileSizeMB.toFixed(2)}MB`);
 
   // Determine transcription strategy based on file size (or force flag for testing)
-  const useGoogleSTT = forceGoogleSTT || audioBlob.size > GROQ_MAX_FILE_SIZE_BYTES;
+  // forceGoogleSTT flag now means "force AssemblyAI" for backwards compatibility
+  const useLargeFileService = forceGoogleSTT || audioBlob.size > GROQ_MAX_FILE_SIZE_BYTES;
 
   if (forceGoogleSTT) {
-    console.log(`[Transcription Strategy] FORCED: Using Google STT for testing`);
+    console.log(`[Transcription Strategy] FORCED: Using AssemblyAI for testing`);
   }
 
-  if (useGoogleSTT && !hasGoogleSTTKey) {
-    // File too large for Groq and Google STT not configured
+  if (useLargeFileService && !hasAssemblyAIKey) {
+    // File too large for Groq and AssemblyAI not configured
     throw new Error(
       `Audio file is ${fileSizeMB.toFixed(1)}MB, which exceeds Groq's ${GROQ_MAX_FILE_SIZE_MB}MB limit. ` +
-      `Please configure GOOGLE_CLOUD_STT_API_KEY for large file support, or record shorter audio (under ~60-90 minutes).`
+      `Please configure ASSEMBLYAI_API_KEY for large file support, or record shorter audio (under ~60-90 minutes).`
     );
   }
 
-  if (useGoogleSTT) {
-    console.log(`[Transcription Strategy] File ${fileSizeMB.toFixed(1)}MB > ${GROQ_MAX_FILE_SIZE_MB}MB - using Google Cloud STT`);
+  if (useLargeFileService) {
+    console.log(`[Transcription Strategy] File ${fileSizeMB.toFixed(1)}MB > ${GROQ_MAX_FILE_SIZE_MB}MB - using AssemblyAI`);
   } else {
     console.log(`[Transcription Strategy] File ${fileSizeMB.toFixed(1)}MB ≤ ${GROQ_MAX_FILE_SIZE_MB}MB - using Groq Whisper`);
   }
 
   // Route to appropriate transcription service
   let transcription: TranscriptionResult;
-  if (useGoogleSTT) {
-    // Google STT fetches the audio itself via the URL
-    transcription = await transcribeWithGoogleSTT(chunk.url, language);
+  if (useLargeFileService) {
+    // AssemblyAI accepts HTTP URLs directly (no GCS needed)
+    transcription = await transcribeWithAssemblyAI(chunk.url, language);
   } else {
     // Groq uses the pre-fetched blob to avoid double-fetching
     transcription = await transcribeWithGroq(audioBlob, chunk.url, language);
