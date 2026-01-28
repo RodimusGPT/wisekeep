@@ -472,54 +472,72 @@ export default function HomeScreen() {
         const part = recordingParts[i];
         console.log(`[processRecording] Processing part ${i + 1}/${recordingParts.length}: ${part.id}`);
 
-        // Read audio file for this part
-        let audioData: Blob | string;
+        // Check if this recording has auto-chunked audio files
+        const audioUris = part.audioChunks && part.audioChunks.length > 0
+          ? part.audioChunks
+          : [part.audioUri];
 
-        if (Platform.OS === 'web') {
-          // Web: fetch works correctly with blob URLs
-          const response = await fetch(part.audioUri);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch audio file for part ${i + 1}: ${response.status}`);
-          }
-          audioData = await response.blob();
-          console.log(`[processRecording] Part ${i + 1} web blob size:`, audioData.size);
-        } else {
-          // iOS/Android: Use the new expo-file-system File class
-          const file = new ExpoFile(part.audioUri);
-          if (!file.exists) {
-            throw new Error(`Audio file for part ${i + 1} does not exist`);
-          }
-          if (file.size === 0) {
-            throw new Error(`Audio file for part ${i + 1} is empty`);
-          }
-          console.log(`[processRecording] Part ${i + 1} native file size:`, file.size);
+        console.log(`[processRecording] Part ${i + 1} has ${audioUris.length} audio chunk(s)`);
 
-          // Read as base64 - uploadAudio will convert to ArrayBuffer
-          audioData = await file.base64();
-          console.log(`[processRecording] Part ${i + 1} native base64 length:`, audioData.length);
+        // Process each audio chunk in this part
+        for (let j = 0; j < audioUris.length; j++) {
+          const chunkUri = audioUris[j];
+          console.log(`[processRecording] Processing audio chunk ${j + 1}/${audioUris.length}: ${chunkUri.substring(0, 50)}...`);
+
+          // Read audio file for this chunk
+          let audioData: Blob | string;
+
+          if (Platform.OS === 'web') {
+            // Web: fetch works correctly with blob URLs
+            const response = await fetch(chunkUri);
+            if (!response.ok) {
+              throw new Error(`Failed to fetch audio chunk ${j + 1}: ${response.status}`);
+            }
+            audioData = await response.blob();
+            console.log(`[processRecording] Chunk ${j + 1} web blob size:`, audioData.size);
+          } else {
+            // iOS/Android: Use the new expo-file-system File class
+            const file = new ExpoFile(chunkUri);
+            if (!file.exists) {
+              throw new Error(`Audio chunk ${j + 1} does not exist at ${chunkUri}`);
+            }
+            if (file.size === 0) {
+              throw new Error(`Audio chunk ${j + 1} is empty`);
+            }
+            console.log(`[processRecording] Chunk ${j + 1} native file size:`, file.size);
+
+            // Read as base64 - uploadAudio will convert to ArrayBuffer
+            audioData = await file.base64();
+            console.log(`[processRecording] Chunk ${j + 1} native base64 length:`, audioData.length);
+          }
+
+          // Estimate duration for this chunk (divide total part duration by number of chunks)
+          const chunkDuration = part.duration / audioUris.length;
+
+          // Upload this chunk
+          console.log(`Uploading chunk ${j + 1}/${audioUris.length} of part ${i + 1}...`);
+          const { chunks, needsChunking } = await uploadAudioChunked(
+            user.authUserId,
+            `${recordingId}_part${i + 1}_chunk${j + 1}`,
+            audioData,
+            chunkDuration
+          );
+
+          // Adjust chunk timestamps to account for previous chunks
+          const adjustedChunks = chunks.map((chunk, idx) => ({
+            ...chunk,
+            startTime: currentTime + chunk.startTime,
+            endTime: currentTime + chunk.endTime,
+            index: allChunks.length + idx,
+          }));
+
+          allChunks.push(...adjustedChunks);
+          currentTime += chunkDuration;
+
+          console.log(`Chunk ${j + 1}/${audioUris.length} upload complete: ${chunks.length} sub-chunk(s)`);
         }
 
-        // Upload this part
-        console.log(`Uploading part ${i + 1}/${recordingParts.length}...`);
-        const { chunks, needsChunking } = await uploadAudioChunked(
-          user.authUserId,
-          `${recordingId}_part${i + 1}`,
-          audioData,
-          part.duration
-        );
-
-        // Adjust chunk timestamps to account for previous parts
-        const adjustedChunks = chunks.map((chunk, idx) => ({
-          ...chunk,
-          startTime: currentTime + chunk.startTime,
-          endTime: currentTime + chunk.endTime,
-          index: allChunks.length + idx,
-        }));
-
-        allChunks.push(...adjustedChunks);
-        currentTime += part.duration;
-
-        console.log(`Part ${i + 1} upload complete: ${chunks.length} chunk(s), chunking ${needsChunking ? 'used' : 'not needed'}`);
+        console.log(`Part ${i + 1} upload complete: total ${allChunks.length} chunk(s) so far`);
       }
 
       console.log(`All parts uploaded: ${allChunks.length} total chunks, ${(totalDuration / 60).toFixed(1)} min total`);
