@@ -756,8 +756,8 @@ async function transcribeBlobDirect(
   };
 }
 
-// Transcribe using Google Cloud Speech-to-Text async (for VIP users with long recordings)
-// Google Cloud STT async API supports up to 8 hours of audio
+// Transcribe using Google Cloud Speech-to-Text async (for large files)
+// Downloads audio and sends as inline base64 content
 async function transcribeWithGoogleSTT(
   audioUrl: string,
   language: string
@@ -767,12 +767,29 @@ async function transcribeWithGoogleSTT(
     throw new Error("GOOGLE_CLOUD_STT_API_KEY not configured");
   }
 
-  console.log(`[Google STT] Starting async transcription for: ${audioUrl.substring(0, 80)}...`);
+  console.log(`[Google STT] Starting transcription for: ${audioUrl.substring(0, 80)}...`);
 
-  // For Google Cloud STT async, we can reference the audio directly via URI
-  // The audio must be publicly accessible (our Supabase signed URLs work)
+  // Download audio and convert to base64 (Google STT requires gs:// or inline content)
+  console.log(`[Google STT] Downloading audio...`);
+  const audioResponse = await fetch(audioUrl);
+  if (!audioResponse.ok) {
+    throw new Error(`Failed to fetch audio for Google STT: ${audioResponse.status}`);
+  }
 
-  // Start async transcription job
+  const audioBlob = await audioResponse.blob();
+  const arrayBuffer = await audioBlob.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+
+  // Convert to base64
+  let binary = '';
+  for (let i = 0; i < uint8Array.length; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  const base64Audio = btoa(binary);
+
+  console.log(`[Google STT] Audio downloaded: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB, sending to API...`);
+
+  // Start async transcription job with inline content
   const startResponse = await fetch(
     `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${googleApiKey}`,
     {
@@ -781,7 +798,6 @@ async function transcribeWithGoogleSTT(
       body: JSON.stringify({
         config: {
           // Don't specify encoding - let Google auto-detect from file headers
-          // M4A/MP4 containers with AAC audio are auto-detected
           languageCode: language === "zh-TW" ? "zh-TW" : language,
           enableAutomaticPunctuation: true,
           enableWordTimeOffsets: true,
@@ -789,7 +805,7 @@ async function transcribeWithGoogleSTT(
           useEnhanced: true, // Better quality
         },
         audio: {
-          uri: audioUrl, // Google will fetch from this URL
+          content: base64Audio, // Inline base64 audio content
         },
       }),
     }
