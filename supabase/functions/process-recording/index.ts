@@ -756,8 +756,145 @@ async function transcribeBlobDirect(
   };
 }
 
+// ============================================
+// Google Cloud Storage Helpers
+// ============================================
+
+// Base64URL encode (for JWT)
+function base64UrlEncode(data: string): string {
+  return btoa(data).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// Create a signed JWT for GCS authentication
+async function createGcsJwt(serviceAccount: { client_email: string; private_key: string }): Promise<string> {
+  const header = { alg: 'RS256', typ: 'JWT' };
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: serviceAccount.client_email,
+    scope: 'https://www.googleapis.com/auth/cloud-platform',
+    aud: 'https://oauth2.googleapis.com/token',
+    iat: now,
+    exp: now + 3600,
+  };
+
+  const headerB64 = base64UrlEncode(JSON.stringify(header));
+  const payloadB64 = base64UrlEncode(JSON.stringify(payload));
+  const unsignedToken = `${headerB64}.${payloadB64}`;
+
+  // Import private key and sign
+  const pemContents = serviceAccount.private_key
+    .replace(/-----BEGIN PRIVATE KEY-----/, '')
+    .replace(/-----END PRIVATE KEY-----/, '')
+    .replace(/\n/g, '');
+  const binaryKey = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
+
+  const cryptoKey = await crypto.subtle.importKey(
+    'pkcs8',
+    binaryKey,
+    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+
+  const signature = await crypto.subtle.sign(
+    'RSASSA-PKCS1-v1_5',
+    cryptoKey,
+    new TextEncoder().encode(unsignedToken)
+  );
+
+  const signatureB64 = base64UrlEncode(String.fromCharCode(...new Uint8Array(signature)));
+  return `${unsignedToken}.${signatureB64}`;
+}
+
+// Get GCS access token from service account
+async function getGcsAccessToken(): Promise<string> {
+  const serviceAccountJson = Deno.env.get("GCS_SERVICE_ACCOUNT_KEY");
+  if (!serviceAccountJson) {
+    throw new Error("GCS_SERVICE_ACCOUNT_KEY not configured");
+  }
+
+  const serviceAccount = JSON.parse(serviceAccountJson);
+  const jwt = await createGcsJwt(serviceAccount);
+
+  const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${jwt}`,
+  });
+
+  if (!tokenResponse.ok) {
+    const error = await tokenResponse.text();
+    throw new Error(`Failed to get GCS access token: ${error}`);
+  }
+
+  const tokenData = await tokenResponse.json();
+  return tokenData.access_token;
+}
+
+// Upload file to GCS and return gs:// URI
+async function uploadToGcs(audioData: ArrayBuffer, fileName: string): Promise<string> {
+  const bucketName = Deno.env.get("GCS_BUCKET_NAME");
+  if (!bucketName) {
+    throw new Error("GCS_BUCKET_NAME not configured");
+  }
+
+  const accessToken = await getGcsAccessToken();
+
+  console.log(`[GCS] Uploading ${(audioData.byteLength / 1024 / 1024).toFixed(2)}MB to gs://${bucketName}/${fileName}`);
+
+  const uploadResponse = await fetch(
+    `https://storage.googleapis.com/upload/storage/v1/b/${bucketName}/o?uploadType=media&name=${encodeURIComponent(fileName)}`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Content-Type': 'audio/mp4',
+      },
+      body: audioData,
+    }
+  );
+
+  if (!uploadResponse.ok) {
+    const error = await uploadResponse.text();
+    throw new Error(`Failed to upload to GCS: ${error}`);
+  }
+
+  console.log(`[GCS] Upload complete`);
+  return `gs://${bucketName}/${fileName}`;
+}
+
+// Delete file from GCS
+async function deleteFromGcs(fileName: string): Promise<void> {
+  const bucketName = Deno.env.get("GCS_BUCKET_NAME");
+  if (!bucketName) return;
+
+  try {
+    const accessToken = await getGcsAccessToken();
+
+    const deleteResponse = await fetch(
+      `https://storage.googleapis.com/storage/v1/b/${bucketName}/o/${encodeURIComponent(fileName)}`,
+      {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${accessToken}` },
+      }
+    );
+
+    if (deleteResponse.ok) {
+      console.log(`[GCS] Deleted ${fileName}`);
+    } else {
+      console.warn(`[GCS] Failed to delete ${fileName}: ${deleteResponse.status}`);
+    }
+  } catch (error) {
+    console.warn(`[GCS] Error deleting file: ${error}`);
+  }
+}
+
+// ============================================
+// Google Cloud Speech-to-Text
+// ============================================
+
 // Transcribe using Google Cloud Speech-to-Text async (for large files)
-// Downloads audio and sends as inline base64 content
+// Uploads to GCS temporarily, transcribes, then deletes
 async function transcribeWithGoogleSTT(
   audioUrl: string,
   language: string
@@ -769,146 +906,145 @@ async function transcribeWithGoogleSTT(
 
   console.log(`[Google STT] Starting transcription for: ${audioUrl.substring(0, 80)}...`);
 
-  // Download audio and convert to base64 (Google STT requires gs:// or inline content)
+  // Download audio from Supabase
   console.log(`[Google STT] Downloading audio...`);
   const audioResponse = await fetch(audioUrl);
   if (!audioResponse.ok) {
     throw new Error(`Failed to fetch audio for Google STT: ${audioResponse.status}`);
   }
 
-  const audioBlob = await audioResponse.blob();
-  const arrayBuffer = await audioBlob.arrayBuffer();
-  const uint8Array = new Uint8Array(arrayBuffer);
+  const audioData = await audioResponse.arrayBuffer();
+  console.log(`[Google STT] Audio downloaded: ${(audioData.byteLength / 1024 / 1024).toFixed(2)}MB`);
 
-  // Convert to base64
-  let binary = '';
-  for (let i = 0; i < uint8Array.length; i++) {
-    binary += String.fromCharCode(uint8Array[i]);
-  }
-  const base64Audio = btoa(binary);
+  // Upload to GCS temporarily
+  const fileName = `temp-audio-${Date.now()}-${Math.random().toString(36).substring(7)}.m4a`;
+  const gcsUri = await uploadToGcs(audioData, fileName);
 
-  console.log(`[Google STT] Audio downloaded: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB, sending to API...`);
-
-  // Start async transcription job with inline content
-  const startResponse = await fetch(
-    `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${googleApiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        config: {
-          // Don't specify encoding - let Google auto-detect from file headers
-          languageCode: language === "zh-TW" ? "zh-TW" : language,
-          enableAutomaticPunctuation: true,
-          enableWordTimeOffsets: true,
-          model: "latest_long", // Optimized for long audio
-          useEnhanced: true, // Better quality
-        },
-        audio: {
-          content: base64Audio, // Inline base64 audio content
-        },
-      }),
-    }
-  );
-
-  if (!startResponse.ok) {
-    const errorText = await startResponse.text();
-    console.error(`[Google STT Error] Failed to start job: ${startResponse.status}, ${errorText}`);
-    throw new Error(`Google STT start error (${startResponse.status}): ${errorText}`);
-  }
-
-  const startResult = await startResponse.json();
-  const operationName = startResult.name;
-
-  if (!operationName) {
-    throw new Error("Google STT did not return operation name");
-  }
-
-  console.log(`[Google STT] Job started: ${operationName}`);
-
-  // Poll for completion
-  let attempts = 0;
-  const maxAttempts = 120; // 10 minutes max (5 second intervals)
-  let completed = false;
-  let transcriptionResult: any = null;
-
-  while (!completed && attempts < maxAttempts) {
-    attempts++;
-
-    // Wait 5 seconds between polls
-    await new Promise(resolve => setTimeout(resolve, 5000));
-
-    const pollResponse = await fetch(
-      `https://speech.googleapis.com/v1/operations/${operationName}?key=${googleApiKey}`
+  try {
+    // Start async transcription job with GCS URI
+    const startResponse = await fetch(
+      `https://speech.googleapis.com/v1/speech:longrunningrecognize?key=${googleApiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          config: {
+            languageCode: language === "zh-TW" ? "zh-TW" : language,
+            enableAutomaticPunctuation: true,
+            enableWordTimeOffsets: true,
+            model: "latest_long",
+            useEnhanced: true,
+          },
+          audio: {
+            uri: gcsUri,
+          },
+        }),
+      }
     );
 
-    if (!pollResponse.ok) {
-      console.error(`[Google STT] Poll error: ${pollResponse.status}`);
-      continue; // Retry
+    if (!startResponse.ok) {
+      const errorText = await startResponse.text();
+      console.error(`[Google STT Error] Failed to start job: ${startResponse.status}, ${errorText}`);
+      throw new Error(`Google STT start error (${startResponse.status}): ${errorText}`);
     }
 
-    const pollResult = await pollResponse.json();
+    const startResult = await startResponse.json();
+    const operationName = startResult.name;
 
-    if (pollResult.done) {
-      completed = true;
-
-      if (pollResult.error) {
-        throw new Error(`Google STT transcription error: ${JSON.stringify(pollResult.error)}`);
-      }
-
-      transcriptionResult = pollResult.response;
-      console.log(`[Google STT] Job completed after ${attempts * 5}s`);
-    } else {
-      if (attempts % 6 === 0) { // Log every 30 seconds
-        console.log(`[Google STT] Still processing... (${attempts * 5}s elapsed)`);
-      }
+    if (!operationName) {
+      throw new Error("Google STT did not return operation name");
     }
-  }
 
-  if (!completed) {
-    throw new Error("Google STT transcription timeout after 10 minutes");
-  }
+    console.log(`[Google STT] Job started: ${operationName}`);
 
-  // Convert Google STT format to our format
-  const fullText = transcriptionResult.results
-    ?.map((r: any) => r.alternatives?.[0]?.transcript || "")
-    .join(" ") || "";
+    // Poll for completion
+    let attempts = 0;
+    const maxAttempts = 120; // 10 minutes max (5 second intervals)
+    let completed = false;
+    let transcriptionResult: any = null;
 
-  // Convert word timings to segments
-  const segments: TranscriptionSegment[] = [];
-  let currentSegment = { start: 0, end: 0, text: "" };
+    while (!completed && attempts < maxAttempts) {
+      attempts++;
 
-  transcriptionResult.results?.forEach((r: any) => {
-    const alternative = r.alternatives?.[0];
-    if (alternative?.words) {
-      alternative.words.forEach((word: any) => {
-        const startTime = parseFloat(word.startTime?.replace('s', '') || '0');
-        const endTime = parseFloat(word.endTime?.replace('s', '') || '0');
+      // Wait 5 seconds between polls
+      await new Promise(resolve => setTimeout(resolve, 5000));
 
-        // Start new segment if gap > 2 seconds or text gets too long
-        if (currentSegment.text &&
-            (startTime - currentSegment.end > 2 || currentSegment.text.length > 200)) {
-          segments.push({ ...currentSegment });
-          currentSegment = { start: startTime, end: endTime, text: word.word };
-        } else {
-          if (!currentSegment.text) {
-            currentSegment.start = startTime;
-          }
-          currentSegment.end = endTime;
-          currentSegment.text += (currentSegment.text ? " " : "") + word.word;
+      const pollResponse = await fetch(
+        `https://speech.googleapis.com/v1/operations/${operationName}?key=${googleApiKey}`
+      );
+
+      if (!pollResponse.ok) {
+        console.error(`[Google STT] Poll error: ${pollResponse.status}`);
+        continue; // Retry
+      }
+
+      const pollResult = await pollResponse.json();
+
+      if (pollResult.done) {
+        completed = true;
+
+        if (pollResult.error) {
+          throw new Error(`Google STT transcription error: ${JSON.stringify(pollResult.error)}`);
         }
-      });
+
+        transcriptionResult = pollResult.response;
+        console.log(`[Google STT] Job completed after ${attempts * 5}s`);
+      } else {
+        if (attempts % 6 === 0) { // Log every 30 seconds
+          console.log(`[Google STT] Still processing... (${attempts * 5}s elapsed)`);
+        }
+      }
     }
-  });
 
-  // Push final segment
-  if (currentSegment.text) {
-    segments.push(currentSegment);
+    if (!completed) {
+      throw new Error("Google STT transcription timeout after 10 minutes");
+    }
+
+    // Convert Google STT format to our format
+    const fullText = transcriptionResult.results
+      ?.map((r: any) => r.alternatives?.[0]?.transcript || "")
+      .join(" ") || "";
+
+    // Convert word timings to segments
+    const segments: TranscriptionSegment[] = [];
+    let currentSegment = { start: 0, end: 0, text: "" };
+
+    transcriptionResult.results?.forEach((r: any) => {
+      const alternative = r.alternatives?.[0];
+      if (alternative?.words) {
+        alternative.words.forEach((word: any) => {
+          const startTime = parseFloat(word.startTime?.replace('s', '') || '0');
+          const endTime = parseFloat(word.endTime?.replace('s', '') || '0');
+
+          // Start new segment if gap > 2 seconds or text gets too long
+          if (currentSegment.text &&
+              (startTime - currentSegment.end > 2 || currentSegment.text.length > 200)) {
+            segments.push({ ...currentSegment });
+            currentSegment = { start: startTime, end: endTime, text: word.word };
+          } else {
+            if (!currentSegment.text) {
+              currentSegment.start = startTime;
+            }
+            currentSegment.end = endTime;
+            currentSegment.text += (currentSegment.text ? " " : "") + word.word;
+          }
+        });
+      }
+    });
+
+    // Push final segment
+    if (currentSegment.text) {
+      segments.push(currentSegment);
+    }
+
+    console.log(`[Google STT] Transcription complete: ${fullText.length} chars, ${segments.length} segments`);
+
+    return { text: fullText, segments };
+
+  } finally {
+    // Always clean up GCS file, even on error
+    await deleteFromGcs(fileName);
   }
-
-  console.log(`[Google STT] Transcription complete: ${fullText.length} chars, ${segments.length} segments`);
-
-  return { text: fullText, segments };
 }
 
 // Transcribe audio using Groq Whisper
