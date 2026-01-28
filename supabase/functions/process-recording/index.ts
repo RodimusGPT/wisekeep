@@ -780,7 +780,8 @@ async function transcribeWithGoogleSTT(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         config: {
-          encoding: "MP4", // M4A container
+          // Don't specify encoding - let Google auto-detect from file headers
+          // M4A/MP4 containers with AAC audio are auto-detected
           languageCode: language === "zh-TW" ? "zh-TW" : language,
           enableAutomaticPunctuation: true,
           enableWordTimeOffsets: true,
