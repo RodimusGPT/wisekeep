@@ -832,6 +832,7 @@ async function getGcsAccessToken(): Promise<string> {
 }
 
 // Upload file to GCS and return gs:// URI
+// Makes file publicly readable so Google STT can access it
 async function uploadToGcs(audioData: ArrayBuffer, fileName: string): Promise<string> {
   const bucketName = Deno.env.get("GCS_BUCKET_NAME");
   if (!bucketName) {
@@ -842,8 +843,9 @@ async function uploadToGcs(audioData: ArrayBuffer, fileName: string): Promise<st
 
   console.log(`[GCS] Uploading ${(audioData.byteLength / 1024 / 1024).toFixed(2)}MB to gs://${bucketName}/${fileName}`);
 
+  // Upload with predefinedAcl=publicRead so Google STT can access it
   const uploadResponse = await fetch(
-    `https://storage.googleapis.com/upload/storage/v1/b/${bucketName}/o?uploadType=media&name=${encodeURIComponent(fileName)}`,
+    `https://storage.googleapis.com/upload/storage/v1/b/${bucketName}/o?uploadType=media&name=${encodeURIComponent(fileName)}&predefinedAcl=publicRead`,
     {
       method: 'POST',
       headers: {
