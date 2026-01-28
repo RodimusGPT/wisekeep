@@ -698,7 +698,8 @@ export default function RecordingDetailScreen() {
         user.id,
         chunks,
         settings.language,
-        recording.duration
+        recording.duration,
+        true // TEMPORARY: Force Google STT for testing - REMOVE AFTER TEST
       );
 
       if (!result.success) {

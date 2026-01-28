@@ -7,10 +7,9 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 // Groq Whisper has a 25MB file size limit
-// For VIP users with files >25MB, we use Google Cloud Speech-to-Text instead
-const GROQ_MAX_FILE_SIZE_MB = 20;
+// For files >25MB, we use Google Cloud Speech-to-Text instead (if configured)
+const GROQ_MAX_FILE_SIZE_MB = 25; // Groq's actual limit
 const GROQ_MAX_FILE_SIZE_BYTES = GROQ_MAX_FILE_SIZE_MB * 1024 * 1024;
-const GROQ_MAX_DURATION_SECONDS = 25 * 60; // ~25 minutes (safe estimate for 25MB)
 const GROQ_TRUNCATION_THRESHOLD = 0.7; // Warn if transcribed less than 70% of expected duration
 
 // Types
@@ -27,6 +26,7 @@ interface ProcessRequest {
   audio_chunks: AudioChunk[]; // Array of chunks (single item for small recordings)
   language: string;
   duration_seconds: number;
+  force_google_stt?: boolean; // For testing: force Google STT regardless of file size
 }
 
 interface UsageCheck {
@@ -894,167 +894,142 @@ async function transcribeWithGoogleSTT(
   return { text: fullText, segments };
 }
 
-// Transcribe a single audio chunk using Groq Whisper
-// Handles server-side splitting if file exceeds Groq's size limit
-async function transcribeChunk(
-  audioUrl: string,
-  language: string,
-  chunkStartTime: number = 0,
-  chunkEndTime: number = 0
+// Transcribe audio using Groq Whisper
+// Accepts a pre-fetched blob to avoid double-fetching
+async function transcribeWithGroq(
+  audioBlob: Blob,
+  audioUrl: string, // Used only for file extension detection
+  language: string
 ): Promise<TranscriptionResult> {
   const groqApiKey = Deno.env.get("GROQ_API_KEY");
   if (!groqApiKey) {
     throw new Error("GROQ_API_KEY not configured");
   }
 
-  // Fetch audio file
-  console.log(`[Audio Fetch] URL: ${audioUrl}`);
-  console.log(`[Audio Fetch] URL length: ${audioUrl.length}`);
-  const audioResponse = await fetch(audioUrl);
-  console.log(`[Audio Fetch] Response status: ${audioResponse.status}, ok: ${audioResponse.ok}`);
-  console.log(`[Audio Fetch] Content-Type: ${audioResponse.headers.get('content-type')}`);
-  console.log(`[Audio Fetch] Content-Length: ${audioResponse.headers.get('content-length')}`);
+  console.log(`[Groq] Blob size: ${audioBlob.size} bytes (${(audioBlob.size / 1024 / 1024).toFixed(2)}MB)`);
+  console.log(`[Groq] Blob type: "${audioBlob.type}"`);
 
-  if (!audioResponse.ok) {
-    const errorBody = await audioResponse.text().catch(() => "");
-    console.error(`[Audio Fetch] FAILED: status=${audioResponse.status}, body=${errorBody.substring(0, 500)}`);
-    throw new Error(`Failed to fetch audio: ${audioResponse.status} - ${errorBody.substring(0, 100)}`);
-  }
-
-  const audioBlob = await audioResponse.blob();
-  console.log(`[Audio Fetch] Blob size: ${audioBlob.size} bytes (${(audioBlob.size / 1024 / 1024).toFixed(2)}MB)`);
-  console.log(`[Audio Fetch] Blob type: "${audioBlob.type}"`);
-
-  // Estimate expected duration based on file size (M4A typically ~64-128 kbps for voice)
-  // This helps detect if the uploaded file was truncated
-  const estimatedMinBitrate = 64 * 1024 / 8; // 64 kbps = 8 KB/s
-  const estimatedMaxBitrate = 128 * 1024 / 8; // 128 kbps = 16 KB/s
-  const estimatedMinDuration = audioBlob.size / estimatedMaxBitrate;
-  const estimatedMaxDuration = audioBlob.size / estimatedMinBitrate;
-  console.log(`[Audio Fetch] Estimated duration from file size: ${(estimatedMinDuration/60).toFixed(1)} - ${(estimatedMaxDuration/60).toFixed(1)} minutes`);
-
-  // Check if file is empty BEFORE sending to Groq
+  // Check if file is empty
   if (audioBlob.size === 0) {
-    console.error(`[Audio Fetch] ERROR: File is empty! URL may be invalid or file doesn't exist.`);
     throw new Error(`Audio file is empty - the file may not exist at this URL`);
   }
 
   // Normalize MIME type for Groq API (convert non-standard types like audio/x-m4a to audio/mp4)
-  // Groq rejects non-standard MIME types, so we need to convert them
   let normalizedBlob = audioBlob;
   let fileExtension = "webm"; // default for web
   const blobType = audioBlob.type?.toLowerCase() || '';
-  let normalizedMimeType = "audio/webm";
 
   if (blobType.includes('x-m4a') || blobType.includes('x-mp4') || blobType.includes('x-aac')) {
     console.log(`Normalizing MIME type from ${audioBlob.type} to audio/mp4`);
     const arrayBuffer = await audioBlob.arrayBuffer();
     normalizedBlob = new Blob([arrayBuffer], { type: 'audio/mp4' });
     fileExtension = "mp4";
-    normalizedMimeType = "audio/mp4";
-  } else if (audioUrl.includes(".m4a") || audioBlob.type?.includes("m4a") || audioBlob.type?.includes("mp4")) {
+  } else if (audioUrl.includes(".m4a") || blobType.includes("m4a") || blobType.includes("mp4")) {
     fileExtension = "mp4";
-    normalizedMimeType = "audio/mp4";
-  } else if (audioUrl.includes(".wav") || audioBlob.type?.includes("wav")) {
+  } else if (audioUrl.includes(".wav") || blobType.includes("wav")) {
     fileExtension = "wav";
-    normalizedMimeType = "audio/wav";
-  } else if (audioBlob.type?.includes("webm")) {
+  } else if (blobType.includes("webm")) {
     fileExtension = "webm";
-    normalizedMimeType = "audio/webm";
   }
 
-  console.log(`File extension: ${fileExtension}, MIME type: ${normalizedBlob.type}`);
-
-  // NOTE: Server-side byte-splitting is DISABLED because it corrupts M4A/MP4 container format.
-  // M4A files have headers and atom structures that can't be split at arbitrary byte boundaries.
-  // Instead, we send the full file to Groq and let their API handle it.
-  // If the file is too large, Groq will return an error which we'll handle gracefully.
-
-  if (normalizedBlob.size > GROQ_MAX_FILE_SIZE_BYTES) {
-    console.log(`[Transcription] WARNING: File size ${(normalizedBlob.size / 1024 / 1024).toFixed(1)}MB exceeds recommended ${GROQ_MAX_FILE_SIZE_MB}MB limit`);
-    console.log(`[Transcription] Attempting to transcribe full file anyway (Groq may support larger files)`);
-  }
+  console.log(`[Groq] File extension: ${fileExtension}, MIME type: ${normalizedBlob.type}`);
 
   // Transcribe the full file
   return transcribeBlobDirect(normalizedBlob, language, fileExtension, groqApiKey);
 }
 
-// Transcribe all audio chunks and combine results
+// Transcribe audio using the appropriate service based on file size
+// - Files ≤25MB: Use Groq Whisper (fast, cheap)
+// - Files >25MB: Use Google Cloud STT (handles long audio)
 async function transcribeAllChunks(
   chunks: AudioChunk[],
   language: string,
-  userTier: string,
-  durationSeconds: number
+  _userTier: string, // No longer used for routing decision
+  durationSeconds: number,
+  forceGoogleSTT: boolean = false // For testing: bypass file size check
 ): Promise<{ fullText: string; notes: NoteItem[] }> {
   let fullText = "";
   const allNotes: NoteItem[] = [];
   let noteId = 1;
   const isTraditionalChinese = language === "zh-TW";
-
-  // Determine if we should use Google STT (VIP users with long recordings)
-  const isVIP = userTier === 'vip' || userTier === 'premium';
-  const isLongRecording = durationSeconds > GROQ_MAX_DURATION_SECONDS;
   const hasGoogleSTTKey = !!Deno.env.get("GOOGLE_CLOUD_STT_API_KEY");
 
-  // Use Google STT only if: VIP + long recording + API key is configured
-  // Otherwise fall back to Groq with chunking (works for any length)
-  const useGoogleSTT = isVIP && isLongRecording && hasGoogleSTTKey;
-
-  if (isVIP && isLongRecording && !hasGoogleSTTKey) {
-    console.log(`[Transcription Strategy] VIP user with ${(durationSeconds/60).toFixed(1)} min recording - Google STT not configured, using Groq with chunking`);
-  } else if (useGoogleSTT) {
-    console.log(`[Transcription Strategy] VIP user with ${(durationSeconds/60).toFixed(1)} min recording - using Google Cloud STT`);
-  } else {
-    console.log(`[Transcription Strategy] Using Groq Whisper (tier: ${userTier}, duration: ${(durationSeconds/60).toFixed(1)} min)`);
+  // With the new no-chunking approach, we should only have 1 chunk (the full file)
+  if (chunks.length !== 1) {
+    console.warn(`[Transcription] Unexpected: received ${chunks.length} chunks. Expected 1 (no client-side chunking).`);
   }
 
-  // Sort chunks by index to ensure correct order
-  const sortedChunks = [...chunks].sort((a, b) => a.index - b.index);
+  const chunk = chunks[0];
+  console.log(`[Transcription] Processing audio: ${chunk.url.substring(0, 80)}...`);
 
-  for (const chunk of sortedChunks) {
-    console.log(`Processing chunk ${chunk.index + 1}/${sortedChunks.length}...`);
+  // Fetch audio to check actual file size
+  const audioResponse = await fetch(chunk.url);
+  if (!audioResponse.ok) {
+    throw new Error(`Failed to fetch audio: ${audioResponse.status}`);
+  }
 
-    // Route to appropriate transcription service
-    let transcription: TranscriptionResult;
-    if (useGoogleSTT) {
-      transcription = await transcribeWithGoogleSTT(chunk.url, language);
-    } else {
-      transcription = await transcribeChunk(chunk.url, language, chunk.startTime, chunk.endTime);
-    }
+  const audioBlob = await audioResponse.blob();
+  const fileSizeMB = audioBlob.size / 1024 / 1024;
+  console.log(`[Transcription] File size: ${fileSizeMB.toFixed(2)}MB`);
 
-    // Convert to Traditional Chinese if needed (Whisper often outputs Simplified)
-    let chunkText = transcription.text;
-    if (isTraditionalChinese) {
-      chunkText = toTraditionalChinese(chunkText);
-    }
+  // Determine transcription strategy based on file size (or force flag for testing)
+  const useGoogleSTT = forceGoogleSTT || audioBlob.size > GROQ_MAX_FILE_SIZE_BYTES;
 
-    // Add space between chunk texts
-    if (fullText && chunkText) {
-      fullText += " ";
-    }
-    fullText += chunkText;
+  if (forceGoogleSTT) {
+    console.log(`[Transcription Strategy] FORCED: Using Google STT for testing`);
+  }
 
-    // Convert segments to notes, adjusting timestamps for chunk offset
-    if (transcription.segments) {
-      for (const segment of transcription.segments) {
-        let segmentText = segment.text.trim();
-        if (isTraditionalChinese) {
-          segmentText = toTraditionalChinese(segmentText);
-        }
-        allNotes.push({
-          id: String(noteId++),
-          timestamp: segment.start + chunk.startTime, // Adjust for chunk position
-          text: segmentText,
-        });
+  if (useGoogleSTT && !hasGoogleSTTKey) {
+    // File too large for Groq and Google STT not configured
+    throw new Error(
+      `Audio file is ${fileSizeMB.toFixed(1)}MB, which exceeds Groq's ${GROQ_MAX_FILE_SIZE_MB}MB limit. ` +
+      `Please configure GOOGLE_CLOUD_STT_API_KEY for large file support, or record shorter audio (under ~60-90 minutes).`
+    );
+  }
+
+  if (useGoogleSTT) {
+    console.log(`[Transcription Strategy] File ${fileSizeMB.toFixed(1)}MB > ${GROQ_MAX_FILE_SIZE_MB}MB - using Google Cloud STT`);
+  } else {
+    console.log(`[Transcription Strategy] File ${fileSizeMB.toFixed(1)}MB ≤ ${GROQ_MAX_FILE_SIZE_MB}MB - using Groq Whisper`);
+  }
+
+  // Route to appropriate transcription service
+  let transcription: TranscriptionResult;
+  if (useGoogleSTT) {
+    // Google STT fetches the audio itself via the URL
+    transcription = await transcribeWithGoogleSTT(chunk.url, language);
+  } else {
+    // Groq uses the pre-fetched blob to avoid double-fetching
+    transcription = await transcribeWithGroq(audioBlob, chunk.url, language);
+  }
+
+  // Convert to Traditional Chinese if needed (Whisper often outputs Simplified)
+  let chunkText = transcription.text;
+  if (isTraditionalChinese) {
+    chunkText = toTraditionalChinese(chunkText);
+  }
+  fullText = chunkText;
+
+  // Convert segments to notes
+  if (transcription.segments) {
+    for (const segment of transcription.segments) {
+      let segmentText = segment.text.trim();
+      if (isTraditionalChinese) {
+        segmentText = toTraditionalChinese(segmentText);
       }
-    } else {
-      // No segments, create single note for this chunk
       allNotes.push({
         id: String(noteId++),
-        timestamp: chunk.startTime,
-        text: chunkText,
+        timestamp: segment.start,
+        text: segmentText,
       });
     }
+  } else {
+    // No segments, create single note
+    allNotes.push({
+      id: String(noteId++),
+      timestamp: 0,
+      text: chunkText,
+    });
   }
 
   return { fullText, notes: allNotes };
@@ -1149,7 +1124,7 @@ Deno.serve(async (req) => {
     // Parse request
     currentStep = "parse_request";
     const body: ProcessRequest = await req.json();
-    const { recording_id, user_id, audio_chunks, language, duration_seconds } = body;
+    const { recording_id, user_id, audio_chunks, language, duration_seconds, force_google_stt } = body;
     recordingId = recording_id || "unknown";
 
     // Validate required fields
@@ -1202,7 +1177,7 @@ Deno.serve(async (req) => {
     // Step 1: Transcribe all chunks and combine
     currentStep = "transcribe";
     console.log(`[${recording_id}] Starting transcription of ${chunkCount} chunk(s)...`);
-    const { fullText, notes } = await transcribeAllChunks(audio_chunks, language, usage.tier, duration_seconds);
+    const { fullText, notes } = await transcribeAllChunks(audio_chunks, language, usage.tier, duration_seconds, force_google_stt || false);
 
     // Calculate actual transcribed duration from segments
     const lastNote = notes[notes.length - 1];

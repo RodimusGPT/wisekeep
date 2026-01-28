@@ -5,7 +5,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { decode } from 'base-64';
-import { chunkAudioBlob, needsChunking, AudioChunk } from '@/utils/audioChunker';
+// Note: Client-side chunking removed - server handles large files via Google STT
 
 /**
  * Get the appropriate file extension and content type for an audio blob
@@ -515,47 +515,18 @@ export async function deleteAudio(userId: string, recordingId: string): Promise<
 }
 
 /**
- * Upload a single audio chunk to storage
- */
-async function uploadChunk(
-  userId: string,
-  recordingId: string,
-  chunk: AudioChunk
-): Promise<string> {
-  const { extension, contentType } = getAudioFormat(chunk.blob);
-  const fileName = `${userId}/${recordingId}_chunk${chunk.index}.${extension}`;
-
-  // Note: On React Native, we cannot normalize blob types - bucket must allow audio/x-m4a
-  console.log(`[uploadChunk] Chunk ${chunk.index}: type ${chunk.blob.type}, uploading as ${contentType}`);
-
-  const { data, error } = await supabase.storage
-    .from('recordings')
-    .upload(fileName, chunk.blob, {
-      contentType,
-      upsert: true,
-    });
-
-  if (error) {
-    console.error(`Error uploading chunk ${chunk.index}:`, error);
-    throw error;
-  }
-
-  // Get signed URL
-  const { data: urlData } = await supabase.storage
-    .from('recordings')
-    .createSignedUrl(fileName, 60 * 60 * 24); // 24 hour expiry
-
-  if (!urlData?.signedUrl) {
-    throw new Error(`Failed to get signed URL for chunk ${chunk.index}`);
-  }
-
-  return urlData.signedUrl;
-}
-
-/**
- * Upload audio with automatic chunking if needed
+ * Upload audio as a single file (no client-side chunking)
+ *
+ * Client-side chunking was removed because byte-level splitting of container
+ * formats (M4A/MP4/WebM) corrupts the audio files - subsequent chunks lack
+ * valid headers and produce garbage transcriptions.
+ *
+ * Instead, the server now handles large files:
+ * - Files ≤25MB: Transcribed via Groq Whisper
+ * - Files >25MB: Transcribed via Google Cloud STT (async)
+ *
  * Accepts Blob (web) or base64 string (React Native)
- * Returns array of chunk URLs with metadata
+ * Returns array with single chunk for backwards compatibility
  */
 export async function uploadAudioChunked(
   userId: string,
@@ -567,55 +538,18 @@ export async function uploadAudioChunked(
   chunks: Array<{ url: string; startTime: number; endTime: number; index: number }>;
   needsChunking: boolean;
 }> {
-  // For base64 strings (React Native), upload directly without chunking
-  // Chunking would require complex audio processing on the client
-  if (typeof audioData === 'string') {
-    console.log(`[uploadAudioChunked] Uploading base64 data (${(audioData.length / 1024 / 1024).toFixed(2)}MB base64)`);
-    const url = await uploadAudio(userId, recordingId, audioData);
-    onProgress?.(1, 1);
-    return {
-      chunks: [{ url, startTime: 0, endTime: durationSeconds, index: 0 }],
-      needsChunking: false,
-    };
-  }
+  const sizeInfo = typeof audioData === 'string'
+    ? `${(audioData.length / 1024 / 1024).toFixed(2)}MB base64`
+    : `${(audioData.size / 1024 / 1024).toFixed(2)}MB`;
 
-  // For Blob (web), check if chunking is needed
-  if (!needsChunking(audioData)) {
-    // Upload as single file
-    const url = await uploadAudio(userId, recordingId, audioData);
-    onProgress?.(1, 1);
-    return {
-      chunks: [{ url, startTime: 0, endTime: durationSeconds, index: 0 }],
-      needsChunking: false,
-    };
-  }
+  console.log(`[uploadAudioChunked] Uploading single file: ${sizeInfo}`);
 
-  // Split into chunks
-  console.log(`Audio size ${(audioData.size / 1024 / 1024).toFixed(1)}MB exceeds limit, chunking...`);
-  const chunkingResult = await chunkAudioBlob(audioData, durationSeconds);
-
-  const uploadedChunks: Array<{ url: string; startTime: number; endTime: number; index: number }> = [];
-
-  // Upload each chunk
-  for (const chunk of chunkingResult.chunks) {
-    console.log(`Uploading chunk ${chunk.index + 1}/${chunkingResult.chunks.length}...`);
-    const url = await uploadChunk(userId, recordingId, chunk);
-
-    uploadedChunks.push({
-      url,
-      startTime: chunk.startTime,
-      endTime: chunk.endTime,
-      index: chunk.index,
-    });
-
-    onProgress?.(chunk.index + 1, chunkingResult.chunks.length);
-  }
-
-  console.log(`All ${uploadedChunks.length} chunks uploaded successfully`);
+  const url = await uploadAudio(userId, recordingId, audioData);
+  onProgress?.(1, 1);
 
   return {
-    chunks: uploadedChunks,
-    needsChunking: true,
+    chunks: [{ url, startTime: 0, endTime: durationSeconds, index: 0 }],
+    needsChunking: false,
   };
 }
 
@@ -658,7 +592,8 @@ export async function processRecording(
   userId: string,
   audioChunks: Array<{ url: string; startTime: number; endTime: number; index: number }>,
   language: string,
-  durationSeconds: number
+  durationSeconds: number,
+  forceGoogleSTT: boolean = false // For testing: force Google STT regardless of file size
 ): Promise<{
   success: boolean;
   error?: string;
@@ -670,7 +605,8 @@ export async function processRecording(
     userId,
     audioChunksCount: audioChunks.length,
     language,
-    durationSeconds
+    durationSeconds,
+    forceGoogleSTT
   });
 
   try {
@@ -681,6 +617,7 @@ export async function processRecording(
         audio_chunks: audioChunks,
         language,
         duration_seconds: durationSeconds,
+        force_google_stt: forceGoogleSTT,
       },
     });
 
