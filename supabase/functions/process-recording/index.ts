@@ -847,35 +847,47 @@ async function transcribeWithAssemblyAI(
     throw new Error("AssemblyAI transcription timeout after 15 minutes");
   }
 
-  // Convert AssemblyAI format to our format
+  // Get full text
   const fullText = transcriptionResult.text || "";
 
-  // Convert words to segments (group by ~200 chars or 2+ second gaps)
+  // Fetch sentences for better natural segmentation
   const segments: TranscriptionSegment[] = [];
-  const words = transcriptionResult.words || [];
 
-  if (words.length > 0) {
-    let currentSegment = { start: words[0].start / 1000, end: 0, text: "" };
-
-    for (const word of words) {
-      const startTime = word.start / 1000; // Convert ms to seconds
-      const endTime = word.end / 1000;
-
-      // Start new segment if gap > 2 seconds or text gets too long
-      if (currentSegment.text &&
-          (startTime - currentSegment.end > 2 || currentSegment.text.length > 200)) {
-        segments.push({ ...currentSegment });
-        currentSegment = { start: startTime, end: endTime, text: word.text };
-      } else {
-        currentSegment.end = endTime;
-        currentSegment.text += (currentSegment.text ? " " : "") + word.text;
+  try {
+    const sentencesResponse = await fetch(
+      `https://api.assemblyai.com/v2/transcript/${transcriptId}/sentences`,
+      {
+        headers: { "Authorization": apiKey },
       }
-    }
+    );
 
-    // Push final segment
-    if (currentSegment.text) {
-      segments.push(currentSegment);
+    if (sentencesResponse.ok) {
+      const sentencesResult = await sentencesResponse.json();
+      const sentences = sentencesResult.sentences || [];
+
+      console.log(`[AssemblyAI] Got ${sentences.length} sentences`);
+
+      for (const sentence of sentences) {
+        segments.push({
+          start: sentence.start / 1000, // Convert ms to seconds
+          end: sentence.end / 1000,
+          text: sentence.text,
+        });
+      }
+    } else {
+      console.warn(`[AssemblyAI] Failed to get sentences: ${sentencesResponse.status}`);
     }
+  } catch (error) {
+    console.warn(`[AssemblyAI] Error fetching sentences: ${error}`);
+  }
+
+  // Fallback: if no sentences, create single segment
+  if (segments.length === 0 && fullText) {
+    segments.push({
+      start: 0,
+      end: transcriptionResult.audio_duration || 0,
+      text: fullText,
+    });
   }
 
   console.log(`[AssemblyAI] Transcription complete: ${fullText.length} chars, ${segments.length} segments`);
