@@ -369,13 +369,15 @@ export default function HomeScreen() {
       // Guard against state updates after unmount
       if (!isMountedRef.current) return;
 
-      // Update local state with remote URL
+      // Update local state with all remote chunk URLs
       updateRecording(recordingId, {
         status: 'recorded',
         audioRemoteUrl: allUploadedChunks[0].url,
+        audioChunksRemote: allUploadedChunks, // Store all chunk URLs for transcription/playback
         notes: [],
         summary: [],
       });
+      console.log(`[saveRecordingOnly] Stored ${allUploadedChunks.length} remote chunks`);
 
       // Cleanup: Revoke blob URLs after successful save (web only)
       if (Platform.OS === 'web' && blobUrlsToRevoke.length > 0) {

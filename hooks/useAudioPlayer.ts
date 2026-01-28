@@ -175,12 +175,19 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     try {
       console.log('[AudioPlayer] Loading recording:', recording.id);
 
-      // Prefer remote URL if available (for uploaded recordings)
-      // Otherwise use local chunks/URI
+      // Priority order for audio sources:
+      // 1. Remote chunks (for uploaded multi-chunk recordings)
+      // 2. Single remote URL (for uploaded single recordings)
+      // 3. Local chunks (for not-yet-uploaded multi-chunk recordings)
+      // 4. Single local URI (for not-yet-uploaded single recordings)
       let chunks: string[];
 
-      if (recording.audioRemoteUrl) {
-        // Uploaded recording - use remote URL
+      if (recording.audioChunksRemote && recording.audioChunksRemote.length > 0) {
+        // Uploaded multi-chunk recording - use all remote URLs
+        console.log('[AudioPlayer] Using remote chunks:', recording.audioChunksRemote.length);
+        chunks = recording.audioChunksRemote.map(c => c.url);
+      } else if (recording.audioRemoteUrl) {
+        // Uploaded single recording - use remote URL
         console.log('[AudioPlayer] Using remote URL:', redactUrl(recording.audioRemoteUrl));
         chunks = [recording.audioRemoteUrl];
       } else if (recording.audioChunks && recording.audioChunks.length > 0) {

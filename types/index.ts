@@ -62,6 +62,7 @@ export interface Recording {
   // Chunks are created every 20 minutes to stay under 25MB Groq limit
   // But presented to user as one seamless recording
   audioChunks?: string[]; // Array of local file paths for each chunk
+  audioChunksRemote?: Array<{ url: string; startTime: number; endTime: number; index: number }>; // Remote URLs after upload
 
   // Multi-part recording support (legacy - for recordings split into separate entries)
   parentRecordingId?: string; // ID of parent recording if this is a part

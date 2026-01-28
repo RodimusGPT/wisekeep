@@ -686,11 +686,17 @@ export default function RecordingDetailScreen() {
       updateRecording(recording.id, { status: 'processing_notes' });
 
       // Call the processing API (transcribe only)
-      // Note: API expects startTime/endTime, not duration
+      // Use all remote chunks if available, otherwise fall back to single URL
+      const chunks = recording.audioChunksRemote && recording.audioChunksRemote.length > 0
+        ? recording.audioChunksRemote
+        : [{ url: transcribeAudioUrl, index: 0, startTime: 0, endTime: recording.duration }];
+
+      console.log(`[Transcription] Processing ${chunks.length} chunk(s)`);
+
       const result = await processRecordingApi(
         recording.id,
         user.id,
-        [{ url: transcribeAudioUrl, index: 0, startTime: 0, endTime: recording.duration }],
+        chunks,
         settings.language,
         recording.duration
       );
