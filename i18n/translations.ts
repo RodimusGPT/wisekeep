@@ -42,12 +42,15 @@ export interface Translations {
   notes: string;
   summaryHeader: string;
   notesHeader: string;
+  keyPoint: string;
+  keyPoints: string;
   tapNotesForMore: string;
   speaker: string;
   addLabel: string;
   edit: string;
   share: string;
   delete: string;
+  deleting: string;
   regenerate: string;
   transcribe: string;
   summarize: string;
@@ -102,6 +105,9 @@ export interface Translations {
   about: string;
   aboutWiseKeep: string;
   version: string;
+  deleteAllRecordings: string;
+  deleteAllRecordingsMessage: string;
+  deleteAllRecordingsSuccess: string;
 
   // Confirmations & Alerts
   confirmDelete: string;
@@ -170,6 +176,10 @@ export interface Translations {
   processingErrorPrefix: string;
   processingErrorRetry: string;
   unknownError: string;
+  resetProcessing: string;
+  resetProcessingMessage: string;
+  processingStuck: string;
+  reset: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -215,12 +225,15 @@ export const translations: Record<Language, Translations> = {
     notes: '筆記',
     summaryHeader: '重點摘要',
     notesHeader: '筆記',
+    keyPoint: '個重點',
+    keyPoints: '個重點',
     tapNotesForMore: '點擊「筆記」查看更多內容',
     speaker: '說話者',
     addLabel: '點擊添加標籤',
     edit: '編輯',
     share: '分享',
     delete: '刪除',
+    deleting: '刪除中...',
     regenerate: '重新整理',
     transcribe: '轉成文字',
     summarize: '整理重點',
@@ -275,6 +288,9 @@ export const translations: Record<Language, Translations> = {
     about: '關於',
     aboutWiseKeep: '關於智守',
     version: '版本',
+    deleteAllRecordings: '刪除所有錄音',
+    deleteAllRecordingsMessage: '這將永久刪除所有錄音，包括雲端資料。此操作無法恢復。',
+    deleteAllRecordingsSuccess: '所有錄音已刪除',
 
     // Confirmations & Alerts
     confirmDelete: '確定要刪除？',
@@ -335,13 +351,17 @@ export const translations: Record<Language, Translations> = {
     recordingStopError: '停止錄音時發生錯誤',
     recordingStopErrorSaved: '停止錄音時發生錯誤，但錄音數據已保存。',
     autoChunkError: '自動分段錯誤',
-    autoChunkErrorPreserved: '自動分段時發生錯誤，錄音已停止。已保存的部分將被保留。',
+    autoChunkErrorPreserved: '自動分段時發生錯誤，錄音已停止。已保存的錄音片段已儲存至您的錄音庫。',
     pleaseLogin: '請先登入',
     processingTimeoutError: '處理超時（2分鐘後無回應）。請稍後再試重新上傳。',
     saveErrorPrefix: '儲存錯誤',
     saveErrorRetry: '儲存過程中發生錯誤，請重試。',
     processingErrorPrefix: '處理錯誤',
     processingErrorRetry: '處理過程中發生錯誤，請重試。',
+    resetProcessing: '重設處理狀態',
+    resetProcessingMessage: '處理似乎卡住了。要重設狀態並重試嗎？',
+    processingStuck: '處理時間過長',
+    reset: '重設',
     unknownError: '未知錯誤',
   },
 
@@ -387,12 +407,15 @@ export const translations: Record<Language, Translations> = {
     notes: 'Notes',
     summaryHeader: 'Summary',
     notesHeader: 'Notes',
+    keyPoint: 'Key Point',
+    keyPoints: 'Key Points',
     tapNotesForMore: 'Tap "Notes" for more details',
     speaker: 'Speaker',
     addLabel: 'Tap to add label',
     edit: 'Edit',
     share: 'Share',
     delete: 'Delete',
+    deleting: 'Deleting...',
     regenerate: 'Regenerate',
     transcribe: 'Transcribe',
     summarize: 'Summarize',
@@ -447,6 +470,9 @@ export const translations: Record<Language, Translations> = {
     about: 'About',
     aboutWiseKeep: 'About WiseKeep',
     version: 'Version',
+    deleteAllRecordings: 'Delete All Recordings',
+    deleteAllRecordingsMessage: 'This will permanently delete all recordings, including cloud data. This action cannot be undone.',
+    deleteAllRecordingsSuccess: 'All recordings deleted',
 
     // Confirmations & Alerts
     confirmDelete: 'Are you sure?',
@@ -507,13 +533,17 @@ export const translations: Record<Language, Translations> = {
     recordingStopError: 'Error stopping recording',
     recordingStopErrorSaved: 'Error stopping recording, but data was saved.',
     autoChunkError: 'Auto-chunk Error',
-    autoChunkErrorPreserved: 'Auto-chunking failed. Recording stopped. Previously saved portions preserved.',
+    autoChunkErrorPreserved: 'Auto-chunking failed. Recording stopped. Your saved portions have been added to your library.',
     pleaseLogin: 'Please log in',
     processingTimeoutError: 'Processing timed out after 2 minutes. Please try uploading again.',
     saveErrorPrefix: 'Save Error',
     saveErrorRetry: 'Error saving recording. Please try again.',
     processingErrorPrefix: 'Processing Error',
     processingErrorRetry: 'Error processing recording. Please try again.',
+    resetProcessing: 'Reset Processing',
+    resetProcessingMessage: 'Processing appears to be stuck. Would you like to reset and try again?',
+    processingStuck: 'Processing taking too long',
+    reset: 'Reset',
     unknownError: 'Unknown error',
   },
 };

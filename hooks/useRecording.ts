@@ -29,6 +29,8 @@ interface UseRecordingReturn {
   stopRecording: () => Promise<Recording | null>;
   requestPermission: () => Promise<boolean>;
   hasPermission: boolean;
+  chunkCount: number; // Number of chunks saved (for VIP auto-chunking)
+  isChunking: boolean; // True while auto-chunk is in progress
 }
 
 export function useRecording(): UseRecordingReturn {
@@ -36,6 +38,8 @@ export function useRecording(): UseRecordingReturn {
   const [duration, setDuration] = useState(0);
   const [metering, setMetering] = useState(0);
   const [hasPermission, setHasPermission] = useState(false);
+  const [chunkCount, setChunkCount] = useState(0); // Tracks saved chunks for UI feedback
+  const [isChunking, setIsChunking] = useState(false); // True during auto-chunk save
 
   // Recorder for native platforms (not used on web)
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -57,14 +61,32 @@ export function useRecording(): UseRecordingReturn {
   const autoChunkPromise = useRef<Promise<void> | null>(null); // Track ongoing auto-chunk operation
   const isStoppingRef = useRef<boolean>(false); // Prevent concurrent stopRecording calls
 
-  const { addRecording, settings, setMicrophonePermission, user } = useAppStore();
+  const { addRecording, settings, setMicrophonePermission, user, setIsRecording: setGlobalIsRecording, setRecordingDuration: setGlobalDuration } = useAppStore();
   const { t } = useI18n();
+
+  // Sync local recording state to global store for status indicator
+  useEffect(() => {
+    setGlobalIsRecording(isRecording);
+    if (!isRecording) {
+      setGlobalDuration(0);
+    }
+  }, [isRecording, setGlobalIsRecording, setGlobalDuration]);
+
+  // Sync duration to global store
+  useEffect(() => {
+    if (isRecording) {
+      setGlobalDuration(duration);
+    }
+  }, [duration, isRecording, setGlobalDuration]);
 
   // Use ref to capture latest t value to avoid stale closures in intervals
   const tRef = useRef(t);
   useEffect(() => {
     tRef.current = t;
   }, [t]);
+
+  // Ref for stopRecording to avoid stale closure in permission check interval
+  const stopRecordingRef = useRef<() => Promise<Recording | null>>(() => Promise.resolve(null));
 
   // Check permission on mount
   useEffect(() => {
@@ -80,14 +102,16 @@ export function useRecording(): UseRecordingReturn {
         const { granted } = await getRecordingPermissionsAsync();
         if (!granted) {
           console.warn('[useRecording] Permission revoked mid-recording');
-          // Stop recording gracefully
+          // Stop recording gracefully - use ref to get latest stopRecording
           clearInterval(permissionCheckInterval);
-          await stopRecording();
-          Alert.alert(
-            tRef.current.recordingError,
-            tRef.current.microphonePermissionMessage,
-            [{ text: tRef.current.confirm }]
-          );
+          await stopRecordingRef.current();
+          if (isMountedRef.current) {
+            Alert.alert(
+              tRef.current.recordingError,
+              tRef.current.microphonePermissionMessage,
+              [{ text: tRef.current.confirm }]
+            );
+          }
         }
       } catch (error) {
         // Permission check errors are non-critical during recording
@@ -104,7 +128,7 @@ export function useRecording(): UseRecordingReturn {
     return () => {
       clearInterval(permissionCheckInterval);
     };
-  }, [isRecording]); // stopRecording is stable, doesn't need to be in deps
+  }, [isRecording]); // Uses refs for stopRecording and translations
 
   // Memoize chunk duration trigger to avoid re-evaluating effect 100x/sec
   // Only change when duration crosses into/out of trigger window
@@ -115,6 +139,24 @@ export function useRecording(): UseRecordingReturn {
     // Trigger window: ±0.5s around chunk duration
     return duration >= chunkDuration - 0.5 && duration <= chunkDuration + 0.5;
   }, [isRecording, user, duration]);
+
+  // DEV: Debug alert when recording starts to confirm build has latest code
+  const hasShownDebugRef = useRef(false);
+  useEffect(() => {
+    if (isRecording && !hasShownDebugRef.current && user) {
+      hasShownDebugRef.current = true;
+      const userTier = user.tier || 'free';
+      const chunkDuration = getChunkDuration(userTier);
+      const canAutoChunk = allowsMultiPart(userTier);
+      Alert.alert(
+        'DEV BUILD 44',
+        `Tier: ${userTier}\nChunk at: ${chunkDuration}s\nAuto-chunk: ${canAutoChunk ? 'YES' : 'NO'}`
+      );
+    }
+    if (!isRecording) {
+      hasShownDebugRef.current = false;
+    }
+  }, [isRecording, user]);
 
   // Auto-chunk or stop recording based on duration and tier
   useEffect(() => {
@@ -140,12 +182,14 @@ export function useRecording(): UseRecordingReturn {
         // Set flag AND timestamp BEFORE calling to prevent multiple triggers
         isAutoChunking.current = true;
         lastAutoChunkTime.current = now;
+        setIsChunking(true); // Show UI indicator
 
         // Create and track promise immediately to prevent race conditions
         const chunkPromise = handleAutoChunk()
           .catch((error) => {
             console.error('[useRecording] Auto-chunk failed:', error);
             isAutoChunking.current = false;
+            setIsChunking(false); // Clear UI indicator on error
             // Don't reset lastAutoChunkTime - we still want debouncing even on failure
             // Don't stop recording on auto-chunk failure, just log it
           })
@@ -183,170 +227,204 @@ export function useRecording(): UseRecordingReturn {
   }, [isInChunkWindow, isRecording, user]); // duration captured in isInChunkWindow memo
 
   // Handle auto-chunking for VIP users (invisible to user)
+  // Designed to be resilient - tries to continue recording even if chunk save fails
   const handleAutoChunk = useCallback(async () => {
     const chunkIndex = audioChunksRef.current.length;
-    // Use timestamp-based naming to prevent collision on retry
     const chunkTimestamp = Date.now();
     console.log(`[useRecording] Saving chunk ${chunkIndex + 1}...`);
 
-    try {
-      // Calculate chunk duration
-      const chunkDuration = Math.floor((chunkTimestamp - startTimeRef.current) / 1000);
-      totalDurationRef.current += chunkDuration;
+    // Calculate chunk duration before any operations
+    const chunkDuration = Math.floor((chunkTimestamp - startTimeRef.current) / 1000);
 
-      if (Platform.OS === 'web') {
-        // Web: Save current blob, clear for next segment
-        if (!webRecorderRef.current || !webRecorderRef.current.state || webRecorderRef.current.state === 'inactive') {
-          throw new Error('Web recorder not active');
+    if (Platform.OS === 'web') {
+      // WEB: MediaRecorder keeps running, so failures are recoverable
+      try {
+        if (!webRecorderRef.current || webRecorderRef.current.state === 'inactive') {
+          console.warn('[useRecording] Web recorder not active, skipping chunk boundary');
+          isAutoChunking.current = false;
+          setIsChunking(false);
+          return; // Recording continues, will retry at next boundary
         }
 
-        // Validate we have data
         if (webChunksRef.current.length === 0) {
-          throw new Error('No audio data in current chunk');
+          console.warn('[useRecording] No audio data yet, skipping chunk boundary');
+          isAutoChunking.current = false;
+          setIsChunking(false);
+          return; // Recording continues, data will accumulate
         }
 
-        // Create blob from current chunks
         const blob = new Blob(webChunksRef.current, { type: 'audio/webm' });
         if (blob.size === 0) {
-          throw new Error('Created blob has zero size');
+          console.warn('[useRecording] Empty blob, skipping chunk boundary');
+          isAutoChunking.current = false;
+          setIsChunking(false);
+          return; // Recording continues
         }
 
         const chunkUri = URL.createObjectURL(blob);
-        blobUrlsRef.current.add(chunkUri); // Track for cleanup
+        blobUrlsRef.current.add(chunkUri);
         audioChunksRef.current.push(chunkUri);
+        totalDurationRef.current += chunkDuration;
+        webChunksRef.current = []; // Clear for next segment
 
-        // Clear chunks for next segment
-        webChunksRef.current = [];
+        console.log(`[useRecording] Chunk ${chunkIndex + 1} saved (web, ${blob.size} bytes), total: ${totalDurationRef.current}s`);
+        startTimeRef.current = Date.now();
+        setDuration(0);
+        isAutoChunking.current = false;
+        setIsChunking(false);
+        setChunkCount(prev => prev + 1); // Increment for UI feedback
 
-        console.log(`[useRecording] Chunk ${chunkIndex + 1} saved (web, ${blob.size} bytes), total duration: ${totalDurationRef.current}s`);
-      } else {
-        // Native: Stop recorder, move file to chunk location, restart
+      } catch (error) {
+        console.error('[useRecording] Web chunk save error (continuing):', error);
+        isAutoChunking.current = false;
+        setIsChunking(false);
+        // Don't stop - MediaRecorder is still running, data accumulates
+      }
+
+    } else {
+      // NATIVE: recorder.stop() is destructive, so we need careful error recovery
+      let chunkSaved = false;
+      let recorderStopped = false;
+
+      try {
         if (!recorder || !recorder.isRecording) {
-          throw new Error('Recorder not in recording state');
+          console.warn('[useRecording] Recorder not active, skipping chunk');
+          isAutoChunking.current = false;
+          setIsChunking(false);
+          return;
         }
 
+        // Stop recorder - this is the point of no return
         await recorder.stop();
+        recorderStopped = true;
 
         const uri = recorder.uri;
-        if (!uri) {
-          throw new Error('No recording URI after stop');
+        if (uri) {
+          const fileInfo = await FileSystem.getInfoAsync(uri);
+          if (fileInfo.exists) {
+            const chunkPath = `${FileSystem.documentDirectory}recordings/${recordingIdRef.current}_chunk${chunkTimestamp}.m4a`;
+
+            await FileSystem.makeDirectoryAsync(
+              `${FileSystem.documentDirectory}recordings/`,
+              { intermediates: true }
+            ).catch(() => {});
+
+            await FileSystem.moveAsync({ from: uri, to: chunkPath });
+            audioChunksRef.current.push(chunkPath);
+            totalDurationRef.current += chunkDuration;
+            chunkSaved = true;
+            console.log(`[useRecording] Chunk ${chunkIndex + 1} saved: ${chunkPath}, total: ${totalDurationRef.current}s`);
+          }
         }
 
-        // Verify file exists before moving
-        const fileInfo = await FileSystem.getInfoAsync(uri);
-        if (!fileInfo.exists) {
-          throw new Error(`Recording file does not exist: ${uri}`);
-        }
+      } catch (error) {
+        console.error('[useRecording] Native chunk save error:', error);
+        // Continue to try restarting recorder
+      }
 
-        // Move to chunk file location (use timestamp to prevent collision on retry)
-        const chunkPath = `${FileSystem.documentDirectory}recordings/${recordingIdRef.current}_chunk${chunkTimestamp}.m4a`;
-
-        // Ensure directory exists
-        await FileSystem.makeDirectoryAsync(
-          `${FileSystem.documentDirectory}recordings/`,
-          { intermediates: true }
-        ).catch(() => {}); // Ignore if exists
-
+      // ALWAYS try to restart recorder if it was stopped
+      if (recorderStopped) {
         try {
-          await FileSystem.moveAsync({
-            from: uri,
-            to: chunkPath,
+          // Reconfigure audio session before restarting (required by iOS/Android)
+          console.log('[useRecording] Reconfiguring audio session for restart...');
+          await setAudioModeAsync({
+            allowsRecording: true,
+            playsInSilentMode: true,
+            interruptionMode: 'doNotMix',
+            shouldPlayInBackground: false,
+            shouldRouteThroughEarpiece: false,
           });
-        } catch (moveError) {
-          console.error('[useRecording] Failed to move chunk file:', moveError);
-          throw new Error(`Failed to move chunk file: ${moveError}`);
-        }
+          await setIsAudioActiveAsync(true);
+          console.log('[useRecording] Audio session reconfigured');
 
-        audioChunksRef.current.push(chunkPath);
-        console.log(`[useRecording] Chunk ${chunkIndex + 1} saved to ${chunkPath}, total duration: ${totalDurationRef.current}s`);
+          await recorder.prepareToRecordAsync();
+          recorder.record();
 
-        // Restart recorder
-        await recorder.prepareToRecordAsync();
-        recorder.record();
-
-        // Verify recorder restarted
-        if (!recorder.isRecording) {
-          throw new Error('Failed to restart recorder after chunk');
-        }
-      }
-
-      // Reset duration timer for next chunk
-      startTimeRef.current = Date.now();
-      setDuration(0);
-
-      // Only clear flag after successful completion
-      isAutoChunking.current = false;
-      console.log(`[useRecording] Auto-chunk complete, continuing recording...`);
-
-    } catch (error) {
-      console.error('[useRecording] Auto-chunk error:', error);
-      isAutoChunking.current = false;
-      autoChunkPromise.current = null; // Reset promise ref to prevent inconsistency
-      lastAutoChunkTime.current = 0; // Reset debounce timer to allow retry if user restarts
-
-      // On error, stop recording completely and preserve what we have
-      setIsRecording(false);
-
-      // Clear timer
-      if (durationIntervalRef.current) {
-        clearInterval(durationIntervalRef.current);
-        durationIntervalRef.current = null;
-      }
-
-      // Cleanup: Revoke any blob URLs created during this recording session (web only)
-      if (Platform.OS === 'web') {
-        blobUrlsRef.current.forEach(url => {
-          try {
-            URL.revokeObjectURL(url);
-            console.log('[useRecording] Revoked blob URL on error:', url);
-          } catch (revokeError) {
-            console.warn('[useRecording] Failed to revoke blob URL:', revokeError);
+          if (recorder.isRecording) {
+            console.log('[useRecording] Recorder restarted successfully');
+            startTimeRef.current = Date.now();
+            setDuration(0);
+            isAutoChunking.current = false;
+            setIsChunking(false);
+            setChunkCount(prev => {
+              const newCount = prev + 1;
+              // DEV: Show alert to confirm chunk saved (remove for production)
+              Alert.alert('Chunk Saved', `Chunk ${newCount} saved successfully. Recording continues.`);
+              return newCount;
+            });
+            return; // Success - recording continues
           }
-        });
-        blobUrlsRef.current.clear();
+        } catch (restartError) {
+          console.error('[useRecording] Failed to restart recorder:', restartError);
+        }
+
+        // Restart failed - this is a fatal error, must stop recording
+        console.error('[useRecording] FATAL: Cannot restart recorder, stopping recording');
+        isAutoChunking.current = false;
+        setIsChunking(false);
+        autoChunkPromise.current = null;
+        setIsRecording(false);
+
+        if (durationIntervalRef.current) {
+          clearInterval(durationIntervalRef.current);
+          durationIntervalRef.current = null;
+        }
+
+        // Preserve what we have
+        const savedChunks = [...audioChunksRef.current];
+        const savedDuration = totalDurationRef.current;
+
+        if (savedChunks.length > 0 && recordingIdRef.current) {
+          const partialRecording: Recording = {
+            id: recordingIdRef.current,
+            createdAt: new Date().toISOString(),
+            duration: savedDuration,
+            audioUri: savedChunks[0],
+            audioChunks: savedChunks,
+            status: 'recorded',
+            language: settings.language,
+          };
+          addRecording(partialRecording);
+          console.log('[useRecording] Partial recording saved:', partialRecording.id);
+        }
+
+        audioChunksRef.current = [];
+        totalDurationRef.current = 0;
+        recordingIdRef.current = null;
+
+        if (isMountedRef.current) {
+          Alert.alert(
+            tRef.current.autoChunkError,
+            savedChunks.length > 0
+              ? tRef.current.autoChunkErrorPreserved
+              : tRef.current.recordingStopError,
+            [{ text: tRef.current.confirm }]
+          );
+        }
       } else {
-        // Native: Clean up orphaned chunk files to prevent storage waste
-        // Delete chunk files that may have been created but recording failed
-        const chunksToCleanup = [...audioChunksRef.current];
-        if (chunksToCleanup.length > 0) {
-          console.log(`[useRecording] Cleaning up ${chunksToCleanup.length} orphaned chunk file(s)...`);
-          for (const chunkPath of chunksToCleanup) {
-            try {
-              const fileInfo = await FileSystem.getInfoAsync(chunkPath);
-              if (fileInfo.exists) {
-                await FileSystem.deleteAsync(chunkPath, { idempotent: true });
-                console.log('[useRecording] Deleted orphaned chunk:', chunkPath);
-              }
-            } catch (deleteError) {
-              console.warn('[useRecording] Failed to delete orphaned chunk:', chunkPath, deleteError);
-              // Continue cleanup even if one file fails
-            }
-          }
-        }
-        audioChunksRef.current = []; // Clear the array after cleanup
+        // Recorder wasn't stopped, just clear the flag
+        isAutoChunking.current = false;
+        setIsChunking(false);
       }
-
-      Alert.alert(
-        tRef.current.autoChunkError,
-        tRef.current.autoChunkErrorPreserved,
-        [{ text: tRef.current.confirm }]
-      );
-
-      // Don't re-throw - error is already handled and user notified via alert
     }
-  }, []); // t is captured via tRef
+  }, [recorder, settings.language, addRecording]);
 
   const checkPermission = async () => {
     if (Platform.OS === 'web') {
       // Web permission is checked when we actually request the microphone
-      setHasPermission(true);
-      setMicrophonePermission(true);
+      if (isMountedRef.current) {
+        setHasPermission(true);
+        setMicrophonePermission(true);
+      }
       return true;
     }
     const { status } = await getRecordingPermissionsAsync();
     const granted = status === 'granted';
-    setHasPermission(granted);
-    setMicrophonePermission(granted);
+    // Only update state if still mounted after async operation
+    if (isMountedRef.current) {
+      setHasPermission(granted);
+      setMicrophonePermission(granted);
+    }
     return granted;
   };
 
@@ -356,14 +434,19 @@ export function useRecording(): UseRecordingReturn {
         // Request microphone access on web
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         stream.getTracks().forEach(track => track.stop()); // Stop immediately, just checking
-        setHasPermission(true);
-        setMicrophonePermission(true);
+        if (isMountedRef.current) {
+          setHasPermission(true);
+          setMicrophonePermission(true);
+        }
         return true;
       }
       const { status } = await requestRecordingPermissionsAsync();
       const granted = status === 'granted';
-      setHasPermission(granted);
-      setMicrophonePermission(granted);
+      // Only update state if still mounted after async operation
+      if (isMountedRef.current) {
+        setHasPermission(granted);
+        setMicrophonePermission(granted);
+      }
       return granted;
     } catch (error) {
       console.error('Error requesting permission:', error);
@@ -380,6 +463,8 @@ export function useRecording(): UseRecordingReturn {
         totalDurationRef.current = 0;
         lastAutoChunkTime.current = 0;
         autoChunkPromise.current = null;
+        setChunkCount(0); // Reset chunk count for new recording
+        setIsChunking(false);
         console.log('[useRecording] Starting new recording session:', recordingIdRef.current);
       } else {
         console.log(`[useRecording] Continuing auto-chunked recording: ${recordingIdRef.current}`);
@@ -488,7 +573,7 @@ export function useRecording(): UseRecordingReturn {
       setIsRecording(false);
       throw error;
     }
-  }, [hasPermission]);
+  }, [hasPermission, requestPermission]);
 
   const stopRecording = useCallback(async (): Promise<Recording | null> => {
     // Guard against concurrent stopRecording calls
@@ -499,6 +584,19 @@ export function useRecording(): UseRecordingReturn {
     isStoppingRef.current = true;
 
     try {
+      // Wait for any in-progress auto-chunk to complete before stopping
+      // This prevents data loss when user stops during chunk transition
+      if (autoChunkPromise.current) {
+        console.log('[useRecording] Waiting for auto-chunk to complete before stopping...');
+        try {
+          await autoChunkPromise.current;
+          console.log('[useRecording] Auto-chunk completed, proceeding with stop');
+        } catch (chunkError) {
+          console.warn('[useRecording] Auto-chunk failed during stop wait:', chunkError);
+          // Continue with stop - the chunk error was already handled by handleAutoChunk
+        }
+      }
+
       // Stop duration timer
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
@@ -757,6 +855,11 @@ export function useRecording(): UseRecordingReturn {
     }
   }, [addRecording, settings.language]);
 
+  // Keep stopRecording ref updated for use in intervals
+  useEffect(() => {
+    stopRecordingRef.current = stopRecording;
+  }, [stopRecording]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
@@ -834,5 +937,7 @@ export function useRecording(): UseRecordingReturn {
     stopRecording,
     requestPermission,
     hasPermission,
+    chunkCount,
+    isChunking,
   };
 }

@@ -5,6 +5,7 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -36,7 +37,9 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
 
   const handleLinePress = (timestamp: number) => {
     if (onLinePress) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      }
       onLinePress(timestamp);
     }
   };
@@ -47,7 +50,8 @@ export function NotesView({ notes, onLinePress, currentTimestamp }: NotesViewPro
     if (currentTimestamp === undefined) return false;
 
     const currentSeconds = currentTimestamp / 1000; // Convert ms to seconds
-    const nextLine = notes[index + 1];
+    // Explicit bounds check for next line
+    const nextLine = index + 1 < notes.length ? notes[index + 1] : null;
     const lineStart = line.timestamp;
     const lineEnd = nextLine ? nextLine.timestamp : Infinity;
 

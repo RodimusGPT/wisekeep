@@ -6,7 +6,10 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "check-secrets": "./scripts/check-secrets.sh",
+    "deploy:functions": "./scripts/check-secrets.sh && supabase functions deploy",
+    "deploy:process-recording": "./scripts/check-secrets.sh && supabase functions deploy process-recording"
   },
   "dependencies": {
     "@breezystack/lamejs": "^1.2.7",

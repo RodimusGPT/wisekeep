@@ -28,13 +28,16 @@ import {
   ConfirmDialog,
   ShareModal,
 } from '@/components/ui';
-import { getFontSize, Recording, NoteLine } from '@/types';
+import { getFontSize, Recording, NoteLine, parseNotes, parseSummary } from '@/types';
 import { File } from 'expo-file-system/next';
 import {
   checkComprehensiveUsage,
   processRecording as processRecordingApi,
   summarizeRecording as summarizeRecordingApi,
   fetchRecordingById,
+  deleteAudio,
+  deleteAudioChunks,
+  hardDeleteRecordingFromDb,
   ComprehensiveUsage,
 } from '@/services/supabase';
 import { useAuth } from '@/hooks';
@@ -63,16 +66,22 @@ export default function RecordingDetailScreen() {
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [labelText, setLabelText] = useState(recording?.label || '');
   const [usage, setUsage] = useState<ComprehensiveUsage | null>(null);
+  const [usageLoadFailed, setUsageLoadFailed] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoadingRecording, setIsLoadingRecording] = useState(!recording);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Spinning animation for processing indicator
   const spinAnim = useRef(new Animated.Value(0)).current;
   const isMountedRef = useRef<boolean>(true);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollAttemptCountRef = useRef<number>(0);
+  const POLL_INTERVAL_MS = 2000; // 2 seconds between polls
+  const MAX_POLL_ATTEMPTS = 90; // 3 minutes at 2-second intervals
 
-  // Cleanup on unmount
+  // Track mount state for async operations
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
       if (pollingIntervalRef.current) {
@@ -94,7 +103,10 @@ export default function RecordingDetailScreen() {
         })
       );
       spin.start();
-      return () => spin.stop();
+      return () => {
+        spin.stop();
+        spinAnim.setValue(0); // Reset animation value on cleanup
+      };
     } else {
       spinAnim.setValue(0);
     }
@@ -134,6 +146,8 @@ export default function RecordingDetailScreen() {
   );
 
   // Load audio when recording changes
+  // Note: Use audioChunks?.length instead of the array itself to avoid
+  // unnecessary re-triggers from reference changes during status updates
   useEffect(() => {
     if (!recording) return;
 
@@ -144,7 +158,7 @@ export default function RecordingDetailScreen() {
     return () => {
       unloadAudio();
     };
-  }, [recording?.id, recording?.audioUri, recording?.audioRemoteUrl, recording?.audioChunks]);
+  }, [recording?.id, recording?.audioUri, recording?.audioRemoteUrl, recording?.audioChunks?.length, loadAudio, unloadAudio]);
 
   // Log when audio loading state changes
   useEffect(() => {
@@ -156,7 +170,7 @@ export default function RecordingDetailScreen() {
     if (!settings.hasSeenFirstRecordingEducation && recording) {
       markFirstRecordingEducationSeen();
     }
-  }, []);
+  }, [settings.hasSeenFirstRecordingEducation, recording, markFirstRecordingEducationSeen]);
 
   // Track which recording we've set the initial tab for
   const tabSetForIdRef = React.useRef<string | null>(null);
@@ -184,33 +198,68 @@ export default function RecordingDetailScreen() {
 
     setActiveTab(newTab);
     tabSetForIdRef.current = id;
-  }, [id, recording?.notes?.length, recording?.summary?.length]);
+  }, [id, recording]);
 
   // Load usage data
   useEffect(() => {
+    let cancelled = false;
+
     const loadUsage = async () => {
       if (user?.id) {
         try {
+          setUsageLoadFailed(false);
           const usageData = await checkComprehensiveUsage(user.id);
-          setUsage(usageData);
+          // Only update state if not cancelled
+          if (!cancelled) {
+            setUsage(usageData);
+          }
         } catch (error) {
           console.error('Failed to load usage:', error);
+          if (!cancelled) {
+            setUsageLoadFailed(true);
+          }
         }
       }
     };
     loadUsage();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user?.id]);
 
   // Fetch recording data from database on mount to ensure we have latest notes/summary
   // This also handles the case where the store hasn't hydrated yet after page refresh
   useEffect(() => {
+    let cancelled = false;
+
     const loadRecordingData = async () => {
       if (!id) return;
 
       setIsLoadingRecording(true);
       try {
         const dbRecording = await fetchRecordingById(id);
+
+        // Check if effect was cancelled (component unmounted or id changed)
+        if (cancelled) return;
+
         if (dbRecording) {
+          // Validate and sanitize database response
+          const validatedNotes = Array.isArray(dbRecording.notes)
+            ? dbRecording.notes.filter((note): note is NoteLine =>
+                typeof note === 'object' &&
+                note !== null &&
+                'id' in note &&
+                'timestamp' in note &&
+                'text' in note &&
+                typeof note.text === 'string'
+              )
+            : undefined;
+
+          const validatedSummary = Array.isArray(dbRecording.summary)
+            ? dbRecording.summary.filter((item): item is string => typeof item === 'string')
+            : undefined;
+
           // If recording doesn't exist in store, add it
           const existingRecording = recordings.find((r) => r.id === id);
           if (!existingRecording) {
@@ -222,15 +271,15 @@ export default function RecordingDetailScreen() {
               audioUri: dbRecording.audio_url || '',
               audioRemoteUrl: dbRecording.audio_url || undefined,
               status: dbRecording.status as Recording['status'],
-              notes: (dbRecording.notes as unknown) as NoteLine[] | undefined,
-              summary: (dbRecording.summary as unknown) as string[] | undefined,
+              notes: validatedNotes,
+              summary: validatedSummary,
             });
           } else {
             // Otherwise just update it
             updateRecording(id, {
               status: dbRecording.status as Recording['status'],
-              notes: (dbRecording.notes as unknown) as NoteLine[] | undefined,
-              summary: (dbRecording.summary as unknown) as string[] | undefined,
+              notes: validatedNotes,
+              summary: validatedSummary,
               audioRemoteUrl: dbRecording.audio_url || undefined,
             });
           }
@@ -238,12 +287,20 @@ export default function RecordingDetailScreen() {
       } catch (error) {
         console.error('[Detail] Error fetching recording data:', error);
       } finally {
-        setIsLoadingRecording(false);
+        if (!cancelled) {
+          setIsLoadingRecording(false);
+        }
       }
     };
 
     loadRecordingData();
-  }, [id]);
+
+    return () => {
+      cancelled = true;
+    };
+  // recordings excluded intentionally - we only want to fetch on id change, not on store updates
+  // addRecording/updateRecording are stable Zustand actions
+  }, [id, addRecording, updateRecording]);
 
   // Poll for processing status updates
   useEffect(() => {
@@ -254,6 +311,7 @@ export default function RecordingDetailScreen() {
 
     if (isCurrentlyProcessing) {
       setIsProcessing(true);
+      pollAttemptCountRef.current = 0; // Reset counter when starting polling
 
       // Clear any existing interval before creating a new one
       if (pollingIntervalRef.current) {
@@ -272,6 +330,18 @@ export default function RecordingDetailScreen() {
           return;
         }
 
+        // Check if we've exceeded max poll attempts
+        pollAttemptCountRef.current++;
+        if (pollAttemptCountRef.current > MAX_POLL_ATTEMPTS) {
+          console.log('[RecordingDetail] Max poll attempts reached, stopping polling');
+          setIsProcessing(false);
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
+          return;
+        }
+
         try {
           const dbRecording = await fetchRecordingById(id);
 
@@ -279,10 +349,35 @@ export default function RecordingDetailScreen() {
           if (!isMountedRef.current) return;
 
           if (dbRecording) {
+            // Validate and sanitize database response
+            const validatedNotes = Array.isArray(dbRecording.notes)
+              ? dbRecording.notes.filter((note): note is NoteLine =>
+                  typeof note === 'object' &&
+                  note !== null &&
+                  'id' in note &&
+                  'timestamp' in note &&
+                  'text' in note &&
+                  typeof note.text === 'string'
+                )
+              : undefined;
+
+            const validatedSummary = Array.isArray(dbRecording.summary)
+              ? dbRecording.summary.filter((item): item is string => typeof item === 'string')
+              : undefined;
+
+            // Validate status is a known value before casting
+            const validStatuses: Recording['status'][] = [
+              'recorded', 'uploading', 'processing_notes', 'processing_summary',
+              'notes_ready', 'ready', 'error'
+            ];
+            const validatedStatus = validStatuses.includes(dbRecording.status as Recording['status'])
+              ? (dbRecording.status as Recording['status'])
+              : recording?.status || 'recorded';
+
             updateRecording(id, {
-              status: dbRecording.status as Recording['status'],
-              notes: (dbRecording.notes as unknown) as NoteLine[] | undefined,
-              summary: (dbRecording.summary as unknown) as string[] | undefined,
+              status: validatedStatus,
+              notes: validatedNotes,
+              summary: validatedSummary,
             });
 
             // Stop polling if processing is complete
@@ -297,7 +392,7 @@ export default function RecordingDetailScreen() {
         } catch (error) {
           console.error('Error polling for updates:', error);
         }
-      }, 2000);
+      }, POLL_INTERVAL_MS);
 
       // Store interval in ref
       pollingIntervalRef.current = pollInterval;
@@ -336,11 +431,13 @@ export default function RecordingDetailScreen() {
     );
   }
 
-  // Format duration
+  // Format duration with bounds checking
   const formatDuration = (seconds: number): string => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-    const secs = seconds % 60;
+    // Clamp to valid range (0 to ~100 hours max)
+    const validSeconds = Math.max(0, Math.min(Math.floor(seconds), 359999));
+    const hours = Math.floor(validSeconds / 3600);
+    const minutes = Math.floor((validSeconds % 3600) / 60);
+    const secs = validSeconds % 60;
 
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${secs
@@ -364,7 +461,15 @@ export default function RecordingDetailScreen() {
 
   const handleNoteLinePress = async (timestamp: number) => {
     // Timestamps from Groq are in seconds, but seekTo expects milliseconds
-    const positionMs = (timestamp || 0) * 1000;
+    const rawPositionMs = (timestamp || 0) * 1000;
+
+    // Clamp position to valid range to handle potentially malformed timestamps from API
+    const maxPositionMs = (recording?.duration || 0) * 1000;
+    const positionMs = Math.max(0, Math.min(rawPositionMs, maxPositionMs));
+
+    if (rawPositionMs !== positionMs) {
+      console.warn('[NotePress] Timestamp out of bounds, clamped:', { raw: rawPositionMs, clamped: positionMs });
+    }
 
     console.log('[NotePress] Pressed timestamp:', timestamp, 'seconds, isLoaded:', isLoaded);
 
@@ -386,25 +491,96 @@ export default function RecordingDetailScreen() {
   };
 
   const handleDelete = async () => {
-    setShowDeleteConfirm(false);
-
-    // Delete audio file (only on native - blob URLs on web are garbage collected)
-    if (Platform.OS !== 'web' && recording.audioUri) {
-      try {
-        const file = new File(recording.audioUri);
-        if (file.exists) {
-          file.delete();
-        }
-      } catch (error) {
-        console.error('Failed to delete audio file:', error);
-      }
+    // Validate recording ID and user exists before attempting delete
+    if (!recording?.id || !user?.id) {
+      console.error('[Delete] Cannot delete recording without valid ID or user');
+      setShowDeleteConfirm(false);
+      return;
     }
 
-    // Delete from store
-    deleteRecording(recording.id);
+    setShowDeleteConfirm(false);
+    setIsDeleting(true);
 
-    // Navigate back
-    router.back();
+    const recordingId = recording.id;
+    const userId = user.id;
+    const chunkCount = recording.audioChunks?.length || 0;
+
+    console.log(`[Delete] Starting complete erasure for recording ${recordingId}`);
+
+    try {
+      // 1. Delete from Supabase Storage (audio files)
+      // This removes the actual audio data from remote storage
+      try {
+        if (chunkCount > 1) {
+          // Multi-chunk recording (VIP long recordings)
+          console.log(`[Delete] Deleting ${chunkCount} audio chunks from storage`);
+          await deleteAudioChunks(userId, recordingId, chunkCount);
+        } else {
+          // Single file recording
+          console.log('[Delete] Deleting audio file from storage');
+          await deleteAudio(userId, recordingId);
+        }
+        console.log('[Delete] Remote audio deleted successfully');
+      } catch (storageError) {
+        // Log but continue - local data should still be cleaned up
+        console.warn('[Delete] Failed to delete remote audio (may not exist):', storageError);
+      }
+
+      // 2. Hard delete from database (removes transcript, summary, all metadata)
+      // This is GDPR-compliant complete erasure
+      try {
+        console.log('[Delete] Hard deleting database record');
+        await hardDeleteRecordingFromDb(recordingId);
+        console.log('[Delete] Database record deleted successfully');
+      } catch (dbError) {
+        // Log but continue with local cleanup
+        console.warn('[Delete] Failed to delete database record:', dbError);
+      }
+
+      // 3. Delete local audio files (native platforms only)
+      if (Platform.OS !== 'web') {
+        // Delete main audio file
+        if (recording.audioUri) {
+          try {
+            const file = new File(recording.audioUri);
+            if (file.exists) {
+              file.delete();
+              console.log('[Delete] Deleted local audio file');
+            }
+          } catch (error) {
+            console.warn('[Delete] Failed to delete local audio file:', error);
+          }
+        }
+
+        // Delete chunk files if present
+        if (recording.audioChunks && recording.audioChunks.length > 0) {
+          for (const chunkPath of recording.audioChunks) {
+            try {
+              const chunkFile = new File(chunkPath);
+              if (chunkFile.exists) {
+                chunkFile.delete();
+                console.log('[Delete] Deleted local chunk file:', chunkPath);
+              }
+            } catch (error) {
+              console.warn('[Delete] Failed to delete local chunk:', error);
+            }
+          }
+        }
+      }
+
+      console.log('[Delete] Complete erasure finished successfully');
+    } catch (error) {
+      console.error('[Delete] Error during deletion:', error);
+      // Still proceed with local cleanup even if remote fails
+    } finally {
+      // 4. Always remove from local store and navigate back
+      // This ensures UI is updated even if remote operations failed
+      if (isMountedRef.current) {
+        setIsDeleting(false);
+      }
+      deleteRecording(recordingId);
+      router.back();
+    }
   };
 
   const handleSaveLabel = () => {
@@ -495,6 +671,13 @@ export default function RecordingDetailScreen() {
       return;
     }
 
+    // Validate recording duration before making API call
+    if (!recording.duration || recording.duration <= 0 || !Number.isFinite(recording.duration)) {
+      console.error('[Transcription] Invalid recording duration:', recording.duration);
+      Alert.alert(t.error, t.tryAgain);
+      return;
+    }
+
     setShowTranscribeConfirm(false);
     console.log('[Transcription] Starting transcription for recording:', recording.id);
 
@@ -540,8 +723,8 @@ export default function RecordingDetailScreen() {
         });
         updateRecording(recording.id, {
           status: updatedRecording.status as Recording['status'],
-          notes: (updatedRecording.notes as unknown) as NoteLine[] | undefined,
-          summary: (updatedRecording.summary as unknown) as string[] | undefined,
+          notes: parseNotes(updatedRecording.notes),
+          summary: parseSummary(updatedRecording.summary),
         });
       } else {
         console.log('[Transcription] No updated recording found!');
@@ -585,6 +768,9 @@ export default function RecordingDetailScreen() {
                 settings.language
               );
 
+              // Check mount state after async operation
+              if (!isMountedRef.current) return;
+
               if (!result.success) {
                 console.error('Summarization failed:', result.error);
                 Alert.alert(t.error, result.error || t.tryAgain);
@@ -595,16 +781,22 @@ export default function RecordingDetailScreen() {
 
               // Fetch the updated recording to get the summary
               const updatedRecording = await fetchRecordingById(recording.id);
+
+              // Check mount state after second async operation
+              if (!isMountedRef.current) return;
+
               if (updatedRecording) {
                 updateRecording(recording.id, {
                   status: updatedRecording.status as Recording['status'],
-                  summary: (updatedRecording.summary as unknown) as string[] | undefined,
+                  summary: parseSummary(updatedRecording.summary),
                 });
               }
 
               setIsProcessing(false);
             } catch (error) {
               console.error('Summarization error:', error);
+              // Only update state if still mounted
+              if (!isMountedRef.current) return;
               Alert.alert(t.error, error instanceof Error ? error.message : t.tryAgain);
               updateRecording(recording.id, { status: 'ready' });
               setIsProcessing(false);
@@ -614,6 +806,28 @@ export default function RecordingDetailScreen() {
       ]
     );
   };
+
+  // Reset stuck processing - allows user to retry
+  const handleResetProcessing = useCallback(() => {
+    if (!recording) return;
+
+    Alert.alert(
+      t.resetProcessing,
+      t.resetProcessingMessage,
+      [
+        { text: t.cancel, style: 'cancel' },
+        {
+          text: t.reset,
+          style: 'destructive',
+          onPress: () => {
+            console.log('[Recording] Resetting stuck processing for:', recording.id);
+            updateRecording(recording.id, { status: 'recorded' });
+            setIsProcessing(false);
+          },
+        },
+      ]
+    );
+  }, [recording, t, updateRecording]);
 
   const tabs = [
     { key: 'notes', label: t.notes },
@@ -641,7 +855,7 @@ export default function RecordingDetailScreen() {
               ]}
               value={labelText}
               onChangeText={setLabelText}
-              placeholder={t.addLabel || '添加標籤...'}
+              placeholder={t.addLabel}
               placeholderTextColor={secondaryColor}
               autoFocus
               onBlur={handleSaveLabel}
@@ -666,7 +880,7 @@ export default function RecordingDetailScreen() {
               ]}
               numberOfLines={1}
             >
-              {recording.label || (t.addLabel || '點擊添加標籤')}
+              {recording.label || t.addLabel}
             </Text>
             <Ionicons
               name="pencil"
@@ -686,7 +900,10 @@ export default function RecordingDetailScreen() {
             { color: textColor, fontSize: getFontSize('body', textSize) },
           ]}
         >
-          {format(new Date(recording.createdAt), 'yyyy/MM/dd HH:mm')}
+          {(() => {
+            const date = new Date(recording.createdAt);
+            return isNaN(date.getTime()) ? '--/--/-- --:--' : format(date, 'yyyy/MM/dd HH:mm');
+          })()}
         </Text>
         <Text
           style={[
@@ -754,6 +971,22 @@ export default function RecordingDetailScreen() {
             >
               {t.mayTakeFewMinutes}
             </Text>
+            {/* Reset button for stuck processing */}
+            <TouchableOpacity
+              style={styles.resetButton}
+              onPress={handleResetProcessing}
+              accessibilityRole="button"
+              accessibilityLabel={t.resetProcessing}
+            >
+              <Text
+                style={[
+                  styles.resetButtonText,
+                  { fontSize: getFontSize('small', textSize) },
+                ]}
+              >
+                {t.processingStuck}
+              </Text>
+            </TouchableOpacity>
           </View>
         ) : recording.status === 'recorded' ? (
           <View style={styles.emptyContent}>
@@ -787,7 +1020,7 @@ export default function RecordingDetailScreen() {
                 { color: secondaryColor, fontSize: getFontSize('body', textSize) },
               ]}
             >
-              {t.noSummaryYet || '尚未產生摘要，請點擊「整理重點」按鈕'}
+              {t.noSummaryYet}
             </Text>
           </View>
         ) : (
@@ -833,13 +1066,14 @@ export default function RecordingDetailScreen() {
           />
         )}
 
-        {/* Delete button always available (except during processing) */}
+        {/* Delete button always available (except during processing or deleting) */}
         {!isProcessing && (
           <BigButton
-            title={t.delete}
+            title={isDeleting ? t.deleting : t.delete}
             onPress={() => setShowDeleteConfirm(true)}
             variant="danger"
             style={styles.actionButton}
+            disabled={isDeleting}
           />
         )}
       </View>
@@ -848,7 +1082,7 @@ export default function RecordingDetailScreen() {
       <ConfirmDialog
         visible={showTranscribeConfirm}
         title={t.transcribePromptTitle}
-        message={`${t.transcribePromptMessage.replace('{minutes}', Math.ceil((recording?.duration || 0) / 60).toString())}\n${t.aiMinutesRemaining.replace('{remaining}', usage?.ai_minutes_remaining === -1 ? t.unlimited : (usage?.ai_minutes_remaining?.toString() || '0'))}`}
+        message={`${t.transcribePromptMessage.replace('{minutes}', Math.max(1, Math.ceil((recording?.duration || 0) / 60)).toString())}\n${t.aiMinutesRemaining.replace('{remaining}', usage?.ai_minutes_remaining === -1 ? t.unlimited : (usage?.ai_minutes_remaining?.toString() || '0'))}`}
         confirmText={t.confirm}
         cancelText={t.cancel}
         onConfirm={performTranscription}
@@ -981,6 +1215,18 @@ const styles = StyleSheet.create({
   processingHint: {
     textAlign: 'center',
     opacity: 0.7,
+  },
+  resetButton: {
+    marginTop: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    backgroundColor: 'rgba(183, 28, 28, 0.1)',
+  },
+  resetButtonText: {
+    color: Colors.error,
+    textAlign: 'center',
+    fontWeight: '500',
   },
   actionButtons: {
     flexDirection: 'row',

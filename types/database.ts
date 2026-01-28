@@ -7,7 +7,7 @@ export type Json =
   | Json[];
 
 // Status type for recordings - shared between types
-export type RecordingStatus = 'recording' | 'recorded' | 'processing_notes' | 'notes_ready' | 'processing_summary' | 'ready' | 'error';
+export type RecordingStatus = 'recording' | 'recorded' | 'uploading' | 'processing_notes' | 'notes_ready' | 'processing_summary' | 'ready' | 'error';
 
 export type Database = {
   public: {

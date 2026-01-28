@@ -39,7 +39,7 @@ export function SummaryView({ summary, tapNotesHint = true }: SummaryViewProps) 
             { color: bulletColor, fontSize: getFontSize('body', textSize) },
           ]}
         >
-          {summary.length} {summary.length === 1 ? 'Key Point' : 'Key Points'}
+          {summary.length} {summary.length === 1 ? t.keyPoint : t.keyPoints}
         </Text>
       </View>
 

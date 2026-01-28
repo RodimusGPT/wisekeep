@@ -7,6 +7,44 @@ export interface NoteLine {
   speaker?: string; // e.g., "Speaker 1", "Speaker 2"
 }
 
+// Type guard for NoteLine
+export function isNoteLine(obj: unknown): obj is NoteLine {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    typeof (obj as NoteLine).id === 'string' &&
+    typeof (obj as NoteLine).timestamp === 'number' &&
+    typeof (obj as NoteLine).text === 'string'
+  );
+}
+
+// Type guard for NoteLine array
+export function isNoteLineArray(arr: unknown): arr is NoteLine[] {
+  return Array.isArray(arr) && arr.every(isNoteLine);
+}
+
+// Type guard for string array (summary)
+export function isStringArray(arr: unknown): arr is string[] {
+  return Array.isArray(arr) && arr.every((item) => typeof item === 'string');
+}
+
+// Safely parse notes from database response
+export function parseNotes(data: unknown): NoteLine[] | undefined {
+  if (!data) return undefined;
+  if (isNoteLineArray(data)) return data;
+  // If invalid, return undefined rather than corrupted data
+  console.warn('[parseNotes] Invalid notes data structure:', typeof data);
+  return undefined;
+}
+
+// Safely parse summary from database response
+export function parseSummary(data: unknown): string[] | undefined {
+  if (!data) return undefined;
+  if (isStringArray(data)) return data;
+  console.warn('[parseSummary] Invalid summary data structure:', typeof data);
+  return undefined;
+}
+
 export interface Recording {
   id: string;
   label?: string; // User-defined label for easy identification
@@ -14,7 +52,7 @@ export interface Recording {
   duration: number; // in seconds
   audioUri: string; // local file path (first chunk for chunked recordings)
   audioRemoteUrl?: string; // Supabase storage URL if uploaded
-  status: 'recording' | 'recorded' | 'processing_notes' | 'notes_ready' | 'processing_summary' | 'ready' | 'error';
+  status: 'recording' | 'recorded' | 'uploading' | 'processing_notes' | 'notes_ready' | 'processing_summary' | 'ready' | 'error';
   notes?: NoteLine[];
   summary?: string[];
   language?: Language;

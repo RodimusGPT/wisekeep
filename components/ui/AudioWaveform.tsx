@@ -22,6 +22,8 @@ export function AudioWaveform({
   ).current;
 
   useEffect(() => {
+    const animations: Animated.CompositeAnimation[] = [];
+
     if (isActive) {
       // Animate bars based on metering level
       barAnims.forEach((anim, index) => {
@@ -32,22 +34,33 @@ export function AudioWaveform({
           Math.min(1, metering + offset * 0.3 + Math.random() * 0.1)
         );
 
-        Animated.timing(anim, {
+        const animation = Animated.timing(anim, {
           toValue: targetHeight,
           duration: 100,
           useNativeDriver: Platform.OS !== 'web',
-        }).start();
+        });
+        animations.push(animation);
+        animation.start();
       });
     } else {
       // Reset all bars to minimum
       barAnims.forEach((anim) => {
-        Animated.timing(anim, {
+        const animation = Animated.timing(anim, {
           toValue: 0.3,
           duration: 300,
           useNativeDriver: Platform.OS !== 'web',
-        }).start();
+        });
+        animations.push(animation);
+        animation.start();
       });
     }
+
+    // Cleanup: stop animations and reset values when effect re-runs or component unmounts
+    return () => {
+      animations.forEach((anim) => anim.stop());
+      // Reset animated values to initial state to prevent memory leaks
+      barAnims.forEach((anim) => anim.setValue(0.3));
+    };
   }, [metering, isActive, barAnims]);
 
   const barColor = isActive ? Colors.recordingActive : colors.textTertiary;

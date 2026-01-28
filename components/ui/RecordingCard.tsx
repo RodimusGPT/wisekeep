@@ -4,6 +4,7 @@ import {
   View,
   Text,
   StyleSheet,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -12,6 +13,16 @@ import { useAppStore } from '@/store';
 import { useI18n, useTheme } from '@/hooks';
 import { Recording, getFontSize } from '@/types';
 import { format, isToday, isYesterday, differenceInDays } from 'date-fns';
+
+// Type-safe icon names for recording status
+type StatusIconName = 'mic' | 'hourglass' | 'checkmark-circle' | 'alert-circle' | 'cloud-upload' | 'document';
+
+interface StatusInfo {
+  icon: StatusIconName;
+  color: string;
+  text: string;
+  bgColor: string;
+}
 
 interface RecordingCardProps {
   recording: Recording;
@@ -24,13 +35,20 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
   const { t } = useI18n();
 
   const handlePress = useCallback(() => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
     onPress();
   }, [onPress]);
 
   // Memoize formatted date
   const formattedDate = useMemo(() => {
     const date = new Date(recording.createdAt);
+
+    // Validate date is valid
+    if (isNaN(date.getTime())) {
+      return t.today; // Fallback to today for invalid dates
+    }
 
     if (isToday(date)) {
       return t.today;
@@ -50,6 +68,10 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
   // Memoize formatted time
   const formattedTime = useMemo(() => {
     const date = new Date(recording.createdAt);
+    // Validate date is valid
+    if (isNaN(date.getTime())) {
+      return '--:--';
+    }
     return format(date, 'HH:mm');
   }, [recording.createdAt]);
 
@@ -68,10 +90,11 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
     return `${seconds} ${t.seconds}`;
   }, [recording.duration, t.hours, t.minutes, t.seconds]);
 
-  // Memoize preview text
+  // Memoize preview text with null safety
   const preview = useMemo(() => {
     if (recording.notes && recording.notes.length > 0) {
-      const firstNote = recording.notes[0].text;
+      const firstNote = recording.notes[0]?.text;
+      if (!firstNote) return '';
       return firstNote.length > 60
         ? firstNote.substring(0, 60) + '...'
         : firstNote;
@@ -79,8 +102,8 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
     return '';
   }, [recording.notes]);
 
-  // Memoize status info
-  const statusInfo = useMemo(() => {
+  // Memoize status info with proper typing
+  const statusInfo = useMemo((): StatusInfo => {
     switch (recording.status) {
       case 'recording':
         return { icon: 'mic', color: Colors.recordingActive, text: '', bgColor: Colors.recordingBackground };
@@ -121,7 +144,7 @@ export const RecordingCard = React.memo(({ recording, onPress }: RecordingCardPr
           {/* Status badge */}
           <View style={[styles.statusBadge, { backgroundColor: statusInfo.bgColor }]}>
             <Ionicons
-              name={statusInfo.icon as any}
+              name={statusInfo.icon}
               size={24}
               color={statusInfo.color}
             />

@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
@@ -20,12 +21,13 @@ import { useI18n, useAuth, usePurchases, useTheme } from '@/hooks';
 import { SettingsItem, BigButton } from '@/components/ui';
 import { getFontSize, TextSize } from '@/types';
 import { Language } from '@/i18n/translations';
+import { deleteAudio, deleteAudioChunks, hardDeleteRecordingFromDb } from '@/services/supabase';
 
 export default function SettingsScreen() {
   const { isDark, colors } = useTheme();
 
   const { t, language, setLanguage } = useI18n();
-  const { settings, setTextSize } = useAppStore();
+  const { settings, setTextSize, clearAllRecordings, recordings } = useAppStore();
   const { user, usage, getRemainingMinutes } = useAuth();
   const {
     isPurchasesSupported,
@@ -40,6 +42,7 @@ export default function SettingsScreen() {
   const [showLanguageModal, setShowLanguageModal] = useState(false);
   const [showTextSizeModal, setShowTextSizeModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   const { background: backgroundColor, text: textColor, textSecondary: secondaryColor, card: cardBackground } = colors;
 
@@ -112,6 +115,89 @@ export default function SettingsScreen() {
         t.purchaseFailed
       );
     }
+  };
+
+  // Handle delete all recordings (cloud + local)
+  const handleDeleteAllRecordings = () => {
+    Alert.alert(
+      t.deleteAllRecordings,
+      t.deleteAllRecordingsMessage,
+      [
+        { text: t.cancel, style: 'cancel' },
+        {
+          text: t.delete,
+          style: 'destructive',
+          onPress: async () => {
+            setIsClearing(true);
+            let successCount = 0;
+            let errorCount = 0;
+
+            const authUserId = user?.authUserId;
+
+            for (const recording of recordings) {
+              try {
+                // 1. Delete from Supabase Storage (if uploaded)
+                if (authUserId && recording.audioRemoteUrl) {
+                  // Check if chunked recording
+                  if (recording.audioChunks && recording.audioChunks.length > 0) {
+                    await deleteAudioChunks(authUserId, recording.id, recording.audioChunks.length);
+                  } else {
+                    await deleteAudio(authUserId, recording.id);
+                  }
+                }
+
+                // 2. Hard delete from database
+                await hardDeleteRecordingFromDb(recording.id);
+
+                // 3. Delete local audio file(s)
+                if (Platform.OS !== 'web') {
+                  try {
+                    // Delete main audio file
+                    if (recording.audioUri) {
+                      const fileInfo = await FileSystem.getInfoAsync(recording.audioUri);
+                      if (fileInfo.exists) {
+                        await FileSystem.deleteAsync(recording.audioUri, { idempotent: true });
+                      }
+                    }
+                    // Delete chunk files if any
+                    if (recording.audioChunks) {
+                      for (const chunkPath of recording.audioChunks) {
+                        const chunkInfo = await FileSystem.getInfoAsync(chunkPath);
+                        if (chunkInfo.exists) {
+                          await FileSystem.deleteAsync(chunkPath, { idempotent: true });
+                        }
+                      }
+                    }
+                  } catch {
+                    // Ignore local file deletion errors
+                  }
+                }
+
+                successCount++;
+              } catch (error) {
+                console.error(`Failed to delete recording ${recording.id}:`, error);
+                errorCount++;
+              }
+            }
+
+            // Clear local store
+            clearAllRecordings();
+            setIsClearing(false);
+
+            if (errorCount > 0) {
+              Alert.alert(
+                '',
+                language === 'zh-TW'
+                  ? `已刪除 ${successCount} 個錄音，${errorCount} 個失敗`
+                  : `Deleted ${successCount} recordings, ${errorCount} failed`
+              );
+            } else {
+              Alert.alert('', t.deleteAllRecordingsSuccess);
+            }
+          },
+        },
+      ]
+    );
   };
 
   // Get tier display text
@@ -318,6 +404,15 @@ export default function SettingsScreen() {
           icon="information-circle"
           label={t.about}
           onPress={() => setShowAboutModal(true)}
+        />
+
+        {/* Delete All Recordings */}
+        <SettingsItem
+          icon="trash-outline"
+          label={isClearing ? t.deleting : t.deleteAllRecordings}
+          value={`${recordings.length} ${language === 'zh-TW' ? '個錄音' : 'recordings'}`}
+          onPress={handleDeleteAllRecordings}
+          disabled={isClearing || recordings.length === 0}
         />
       </ScrollView>
 

@@ -1,5 +1,5 @@
 import { supabase, isSupabaseConfigured } from './supabase';
-import { Recording, NoteLine } from '@/types';
+import { Recording, NoteLine, parseNotes, parseSummary } from '@/types';
 import { Language } from '@/i18n/translations';
 import { File as ExpoFile } from 'expo-file-system';
 import { decode } from 'base-64';
@@ -245,9 +245,9 @@ export async function pollRecordingStatus(
       audioUri: data.audio_url,
       audioRemoteUrl: data.audio_url,
       status: data.status,
-      // Type casts needed: database stores as Json, we validate structure above
-      notes: (data.notes as unknown) as NoteLine[] | undefined,
-      summary: (data.summary as unknown) as string[] | undefined,
+      // Type-safe parsing: database stores as Json, parse with validation
+      notes: parseNotes(data.notes),
+      summary: parseSummary(data.summary),
       language: (data.language as Language) || undefined,
       errorMessage: data.error_message ?? undefined,
     };

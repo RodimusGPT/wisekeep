@@ -50,6 +50,8 @@ export default function HomeScreen() {
     stopRecording,
     requestPermission,
     hasPermission,
+    chunkCount,
+    isChunking,
   } = useRecording();
 
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -59,6 +61,7 @@ export default function HomeScreen() {
   const pollingCleanupRef = useRef<(() => void) | null>(null);
   const spinnerCleanupRef = useRef<(() => void) | null>(null);
   const isMountedRef = useRef<boolean>(true);
+  const isRecordButtonBusyRef = useRef<boolean>(false); // Debounce for rapid button presses
 
   // Track component mount state
   useEffect(() => {
@@ -90,6 +93,18 @@ export default function HomeScreen() {
       scrollViewRef.current?.scrollTo({ y: 0, animated: true });
     }, [])
   );
+
+  // Handle case where processingId points to a deleted recording
+  // (moved from render to useEffect to avoid state updates during render)
+  useEffect(() => {
+    if (processingId) {
+      const processingRecording = recordings.find((r) => r.id === processingId);
+      if (!processingRecording) {
+        console.warn('[HomeScreen] Processing recording not found, resetting processingId');
+        setProcessingId(null);
+      }
+    }
+  }, [processingId, recordings]);
 
   // Spinning animation for processing indicator
   useEffect(() => {
@@ -124,10 +139,11 @@ export default function HomeScreen() {
         spinnerCleanupRef.current = null;
       };
     } else {
-      // Clear cleanup ref when not processing
+      // Clear cleanup ref and reset animation when not processing
       spinnerCleanupRef.current = null;
+      spinAnim.setValue(0); // Defensive reset
     }
-  }, [processingId]);
+  }, [processingId, spinAnim]);
 
   const { background: backgroundColor, text: textColor, textSecondary: secondaryColor } = colors;
 
@@ -135,6 +151,13 @@ export default function HomeScreen() {
   const recentRecordings = useMemo(() => recordings.slice(0, 3), [recordings]);
 
   const handleRecordPress = useCallback(async () => {
+    // Debounce rapid button presses to prevent overlapping operations
+    if (isRecordButtonBusyRef.current) {
+      console.log('[handleRecordPress] Ignoring rapid press - button busy');
+      return;
+    }
+    isRecordButtonBusyRef.current = true;
+
     console.log('handleRecordPress called, isRecording:', isRecording);
     try {
       if (isRecording) {
@@ -191,8 +214,12 @@ export default function HomeScreen() {
     } catch (error) {
       console.error('Recording error:', error);
       Alert.alert(t.error, t.tryAgain);
+    } finally {
+      // Re-enable button immediately after operation completes
+      // The debounce flag prevents concurrent operations, not sequential ones
+      isRecordButtonBusyRef.current = false;
     }
-  }, [isRecording, stopRecording, setCurrentRecordingId, user, hasPermission, requestPermission, startRecording, t, router, settings.language]);
+  }, [isRecording, stopRecording, setCurrentRecordingId, user, hasPermission, requestPermission, startRecording, t, router]);
 
   // Save recording without AI processing (on-demand model)
   const saveRecordingOnly = async (recording: Recording) => {
@@ -588,6 +615,7 @@ export default function HomeScreen() {
               if (dbRecording.status === 'ready' || dbRecording.status === 'error') {
                 console.log('Processing finished with status:', dbRecording.status);
                 setProcessingId(null);
+                pollingCleanupRef.current = null; // Clear stale reference
 
                 // Navigate to recording detail if first recording
                 if (!settings.hasSeenFirstRecordingEducation && recordings.length === 1) {
@@ -698,6 +726,20 @@ export default function HomeScreen() {
           {/* Timer */}
           <Timer seconds={duration} isRecording label={t.recording} />
 
+          {/* Chunk indicator (DEV: shows auto-chunking status) */}
+          {(chunkCount > 0 || isChunking) && (
+            <View style={[styles.chunkIndicator, isChunking && styles.chunkIndicatorActive]}>
+              <Ionicons
+                name={isChunking ? 'sync' : 'checkmark-circle'}
+                size={16}
+                color={isChunking ? Colors.warning : Colors.success}
+              />
+              <Text style={[styles.chunkText, { color: isChunking ? Colors.warning : Colors.success }]}>
+                {isChunking ? 'Saving chunk...' : `Chunk ${chunkCount} saved`}
+              </Text>
+            </View>
+          )}
+
           {/* Waveform */}
           <View style={styles.waveformContainer}>
             <AudioWaveform metering={metering} isActive />
@@ -718,10 +760,9 @@ export default function HomeScreen() {
   if (processingId) {
     const processingRecording = recordings.find((r) => r.id === processingId);
 
-    // If recording was deleted while processing, reset processingId
+    // If recording was deleted while processing, render nothing
+    // (the useEffect above will reset processingId on next render)
     if (!processingRecording) {
-      console.warn('[HomeScreen] Processing recording not found, resetting processingId');
-      setProcessingId(null);
       return null;
     }
 
@@ -1011,6 +1052,23 @@ const styles = StyleSheet.create({
   },
   waveformContainer: {
     marginVertical: 40,
+  },
+  chunkIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(76, 175, 80, 0.15)',
+    marginTop: 12,
+  },
+  chunkIndicatorActive: {
+    backgroundColor: 'rgba(255, 152, 0, 0.15)',
+  },
+  chunkText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
 
   // Processing view

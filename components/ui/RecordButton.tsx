@@ -85,7 +85,7 @@ export function RecordButton({ isRecording, onPress, label }: RecordButtonProps)
         isRecording
           ? Haptics.ImpactFeedbackStyle.Heavy
           : Haptics.ImpactFeedbackStyle.Medium
-      );
+      ).catch(() => {});
     }
     onPress();
   };

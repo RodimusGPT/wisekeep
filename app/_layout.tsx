@@ -5,12 +5,14 @@ import { useFonts } from 'expo-font';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { useEffect, useState } from 'react';
+import { View, StyleSheet } from 'react-native';
 import 'react-native-reanimated';
 
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAppStore } from '@/store';
 import { useAuth } from '@/hooks/useAuth';
 import { Colors } from '@/constants/Colors';
+import { RecordingIndicator } from '@/components/ui/RecordingIndicator';
 
 export {
   ErrorBoundary,
@@ -108,30 +110,39 @@ function RootLayoutNav() {
 
   return (
     <ThemeProvider value={isDark ? darkTheme : lightTheme}>
-      <Stack>
-        <Stack.Screen name="onboarding" options={{ headerShown: false }} />
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen
-          name="recording/[id]"
-          options={{
-            headerTitle: '',
-            headerBackTitle: '',
-            headerTintColor: Colors.primary,
-            headerStyle: {
-              backgroundColor: isDark ? Colors.backgroundDark : Colors.background,
-            },
-            headerLeft: () => (
-              <Ionicons
-                name="arrow-back"
-                size={28}
-                color={Colors.primary}
-                onPress={() => router.back()}
-                style={{ paddingHorizontal: 8, paddingVertical: 4 }}
-              />
-            ),
-          }}
-        />
-      </Stack>
+      <View style={styles.container}>
+        <RecordingIndicator />
+        <Stack>
+          <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="recording/[id]"
+            options={{
+              headerTitle: '',
+              headerBackTitle: '',
+              headerTintColor: Colors.primary,
+              headerStyle: {
+                backgroundColor: isDark ? Colors.backgroundDark : Colors.background,
+              },
+              headerLeft: () => (
+                <Ionicons
+                  name="arrow-back"
+                  size={28}
+                  color={Colors.primary}
+                  onPress={() => router.back()}
+                  style={{ paddingHorizontal: 8, paddingVertical: 4 }}
+                />
+              ),
+            }}
+          />
+        </Stack>
+      </View>
     </ThemeProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+});

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
   View,
@@ -21,6 +21,9 @@ import { BigButton } from './BigButton';
 // Limited to prevent unbounded memory growth
 const mp3Cache = new Map<string, Blob>();
 const MAX_MP3_CACHE_SIZE = 5;
+
+// Track ongoing conversions to prevent concurrent AudioContext creation
+const conversionInProgress = new Map<string, Promise<Blob>>();
 
 // Target sample rate for MP3 encoding (lamejs works best with standard rates)
 const TARGET_SAMPLE_RATE = 44100;
@@ -54,105 +57,143 @@ function resampleAudio(
 
 // Convert WebM audio to MP3 for better compatibility
 async function convertToMp3(recordingId: string, audioUrl: string): Promise<Blob> {
+  // Use compound cache key to handle case where same recordingId might have different audio URLs
+  const cacheKey = `${recordingId}_${audioUrl.slice(-20)}`;
+
   // Check cache first (verify it's actually MP3)
-  const cached = mp3Cache.get(recordingId);
+  const cached = mp3Cache.get(cacheKey);
   if (cached && cached.type === 'audio/mpeg') {
     console.log('[MP3] Using cached MP3 for:', recordingId);
     return cached;
   }
 
+  // Check if conversion is already in progress (prevents multiple AudioContext instances)
+  const existingConversion = conversionInProgress.get(cacheKey);
+  if (existingConversion) {
+    console.log('[MP3] Waiting for existing conversion:', recordingId);
+    return existingConversion;
+  }
+
   console.log('[MP3] Converting to MP3:', recordingId);
-  // Dynamically import lamejs (using maintained fork for better bundler compatibility)
-  const { Mp3Encoder } = await import('@breezystack/lamejs');
 
-  // Fetch the audio file
-  const response = await fetch(audioUrl);
-  if (!response.ok) throw new Error('Failed to fetch audio');
-  const arrayBuffer = await response.arrayBuffer();
-  console.log('[MP3] Fetched audio, size:', arrayBuffer.byteLength);
+  // Create the conversion promise and track it
+  const conversionPromise = (async (): Promise<Blob> => {
+    // Dynamically import lamejs (using maintained fork for better bundler compatibility)
+    const { Mp3Encoder } = await import('@breezystack/lamejs');
 
-  // Decode the audio using Web Audio API
-  const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // Fetch the audio file
+    const response = await fetch(audioUrl);
+    if (!response.ok) throw new Error('Failed to fetch audio');
+    const arrayBuffer = await response.arrayBuffer();
+    console.log('[MP3] Fetched audio, size:', arrayBuffer.byteLength);
 
-  // Handle browser autoplay policy - resume if suspended
-  if (audioContext.state === 'suspended') {
-    await audioContext.resume();
-  }
+    // Decode the audio using Web Audio API
+    // AudioContext created inside try block to ensure cleanup even if fetch fails
+    let audioContext: AudioContext | null = null;
 
-  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    // Wrap in try-finally to ensure AudioContext is always closed, even on decode/encode failure
+    let mp3Data: Uint8Array[];
+    try {
+      // Create AudioContext inside try block so it's always cleaned up
+      audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
 
-  // Get audio data
-  const originalSampleRate = audioBuffer.sampleRate;
-  // Cast to Float32Array to satisfy TypeScript (getChannelData returns Float32Array<ArrayBufferLike>)
-  let samples: Float32Array = audioBuffer.getChannelData(0) as Float32Array; // Get mono channel
-  console.log('[MP3] Original sample rate:', originalSampleRate, 'samples:', samples.length);
+      // Handle browser autoplay policy - resume if suspended
+      // Wrap in try-catch as resume can fail with permission issues in some browsers
+      if (audioContext.state === 'suspended') {
+        try {
+          await audioContext.resume();
+        } catch (resumeError) {
+          console.warn('[MP3] Failed to resume AudioContext:', resumeError);
+          // Continue anyway - decodeAudioData might still work
+        }
+      }
 
-  // Resample to standard rate if needed (lamejs works best with 44100)
-  if (originalSampleRate !== TARGET_SAMPLE_RATE) {
-    console.log('[MP3] Resampling from', originalSampleRate, 'to', TARGET_SAMPLE_RATE);
-    samples = resampleAudio(samples, originalSampleRate, TARGET_SAMPLE_RATE);
-    console.log('[MP3] Resampled samples:', samples.length);
-  }
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
-  // Convert Float32Array to Int16Array for lamejs
-  const int16Samples = new Int16Array(samples.length);
-  for (let i = 0; i < samples.length; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
+      // Get audio data
+      const originalSampleRate = audioBuffer.sampleRate;
+      // Cast to Float32Array to satisfy TypeScript (getChannelData returns Float32Array<ArrayBufferLike>)
+      let samples: Float32Array = audioBuffer.getChannelData(0) as Float32Array; // Get mono channel
+      console.log('[MP3] Original sample rate:', originalSampleRate, 'samples:', samples.length);
 
-  // Create MP3 encoder (mono, 44100 Hz, 128kbps)
-  const mp3Encoder = new Mp3Encoder(1, TARGET_SAMPLE_RATE, 128);
+      // Resample to standard rate if needed (lamejs works best with 44100)
+      if (originalSampleRate !== TARGET_SAMPLE_RATE) {
+        console.log('[MP3] Resampling from', originalSampleRate, 'to', TARGET_SAMPLE_RATE);
+        samples = resampleAudio(samples, originalSampleRate, TARGET_SAMPLE_RATE);
+        console.log('[MP3] Resampled samples:', samples.length);
+      }
 
-  // Encode in chunks
-  const mp3Data: Uint8Array[] = [];
-  const chunkSize = 1152; // Must be multiple of 576 for lamejs
+      // Convert Float32Array to Int16Array for lamejs
+      const int16Samples = new Int16Array(samples.length);
+      for (let i = 0; i < samples.length; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        int16Samples[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
 
-  for (let i = 0; i < int16Samples.length; i += chunkSize) {
-    const chunk = int16Samples.subarray(i, i + chunkSize);
-    const mp3Chunk = mp3Encoder.encodeBuffer(chunk);
-    if (mp3Chunk.length > 0) {
-      // Convert Int8Array to Uint8Array for Blob compatibility
-      mp3Data.push(new Uint8Array(mp3Chunk));
+      // Create MP3 encoder (mono, 44100 Hz, 128kbps)
+      const mp3Encoder = new Mp3Encoder(1, TARGET_SAMPLE_RATE, 128);
+
+      // Encode in chunks
+      mp3Data = [];
+      const chunkSize = 1152; // Must be multiple of 576 for lamejs
+
+      for (let i = 0; i < int16Samples.length; i += chunkSize) {
+        const chunk = int16Samples.subarray(i, i + chunkSize);
+        const mp3Chunk = mp3Encoder.encodeBuffer(chunk);
+        if (mp3Chunk.length > 0) {
+          // Convert Int8Array to Uint8Array for Blob compatibility
+          mp3Data.push(new Uint8Array(mp3Chunk));
+        }
+      }
+
+      // Flush the encoder
+      const finalChunk = mp3Encoder.flush();
+      if (finalChunk.length > 0) {
+        mp3Data.push(new Uint8Array(finalChunk));
+      }
+    } finally {
+      // Always close audio context, even on error
+      if (audioContext && audioContext.state !== 'closed') {
+        await audioContext.close().catch((e) => console.warn('[MP3] Error closing AudioContext:', e));
+      }
     }
-  }
 
-  // Flush the encoder
-  const finalChunk = mp3Encoder.flush();
-  if (finalChunk.length > 0) {
-    mp3Data.push(new Uint8Array(finalChunk));
-  }
+    // Calculate total size
+    const totalSize = mp3Data.reduce((sum, chunk) => sum + chunk.length, 0);
+    console.log('[MP3] Encoded MP3 size:', totalSize, 'bytes, chunks:', mp3Data.length);
 
-  // Close audio context (only if not already closed)
-  if (audioContext.state !== 'closed') {
-    await audioContext.close();
-  }
-
-  // Calculate total size
-  const totalSize = mp3Data.reduce((sum, chunk) => sum + chunk.length, 0);
-  console.log('[MP3] Encoded MP3 size:', totalSize, 'bytes, chunks:', mp3Data.length);
-
-  // Verify we got actual MP3 data
-  if (totalSize < 1000) {
-    throw new Error('MP3 encoding produced insufficient data');
-  }
-
-  // Create MP3 blob with correct MIME type
-  const mp3Blob = new Blob(mp3Data as BlobPart[], { type: 'audio/mpeg' });
-
-  // Cache for future shares (with LRU eviction to prevent unbounded growth)
-  if (mp3Cache.size >= MAX_MP3_CACHE_SIZE) {
-    // Remove oldest entry (first key in Map iteration order)
-    const oldestKey = mp3Cache.keys().next().value;
-    if (oldestKey) {
-      mp3Cache.delete(oldestKey);
-      console.log('[MP3] Evicted oldest cache entry:', oldestKey);
+    // Verify we got actual MP3 data
+    if (totalSize < 1000) {
+      throw new Error('MP3 encoding produced insufficient data');
     }
-  }
-  mp3Cache.set(recordingId, mp3Blob);
-  console.log('[MP3] Cached MP3 for:', recordingId, 'size:', mp3Blob.size);
 
-  return mp3Blob;
+    // Create MP3 blob with correct MIME type
+    const mp3Blob = new Blob(mp3Data as BlobPart[], { type: 'audio/mpeg' });
+
+    // Cache for future shares (with LRU eviction to prevent unbounded growth)
+    if (mp3Cache.size >= MAX_MP3_CACHE_SIZE) {
+      // Remove oldest entry (first key in Map iteration order)
+      const oldestKey = mp3Cache.keys().next().value;
+      if (oldestKey) {
+        mp3Cache.delete(oldestKey);
+        console.log('[MP3] Evicted oldest cache entry:', oldestKey);
+      }
+    }
+    mp3Cache.set(cacheKey, mp3Blob);
+    console.log('[MP3] Cached MP3 for:', cacheKey, 'size:', mp3Blob.size);
+
+    return mp3Blob;
+  })();
+
+  // Track the conversion promise
+  conversionInProgress.set(cacheKey, conversionPromise);
+
+  try {
+    return await conversionPromise;
+  } finally {
+    // Clean up tracking after completion (success or error)
+    conversionInProgress.delete(cacheKey);
+  }
 }
 
 interface ShareModalProps {
@@ -166,6 +207,15 @@ export function ShareModal({ visible, recording, onClose, onCopied }: ShareModal
   const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
   const { t } = useI18n();
+
+  // Track mount state for async operations
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // State for in-app alert dialog
   const [alertMessage, setAlertMessage] = useState<string | null>(null);
@@ -207,6 +257,7 @@ export function ShareModal({ visible, recording, onClose, onCopied }: ShareModal
 
   // Show in-app alert dialog instead of browser popup
   const showAlert = (message: string, closeAfter: boolean = false) => {
+    if (!isMountedRef.current) return;
     if (closeAfter) {
       onClose();
     }
@@ -266,24 +317,35 @@ export function ShareModal({ visible, recording, onClose, onCopied }: ShareModal
           // Convert webm to MP3 for better compatibility (cached per recording)
           const mp3Blob = await convertToMp3(recording.id, audioUrl);
 
+          // Check if component is still mounted after async operation
+          if (!isMountedRef.current) return;
+
           // Create a local blob URL (not shareable externally)
-          const blobUrl = URL.createObjectURL(mp3Blob);
+          // Use try-finally to ensure blob URL is always cleaned up
+          let blobUrl: string | null = null;
+          try {
+            blobUrl = URL.createObjectURL(mp3Blob);
 
-          // Trigger download
-          const link = document.createElement('a');
-          link.href = blobUrl;
-          link.download = `recording-${recording.id}.mp3`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
+            // Trigger download
+            const link = document.createElement('a');
+            link.href = blobUrl;
+            link.download = `recording-${recording.id}.mp3`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          } finally {
+            // Clean up the blob URL immediately, even if download fails
+            if (blobUrl) {
+              URL.revokeObjectURL(blobUrl);
+            }
+          }
 
-          // Clean up the blob URL immediately
-          URL.revokeObjectURL(blobUrl);
-
+          if (!isMountedRef.current) return;
           setIsConverting(false);
           onClose();
         } catch (error) {
           console.error('Failed to download audio:', error);
+          if (!isMountedRef.current) return;
           setIsConverting(false);
           showAlert(t.failedToShareAudio, true);
         }
@@ -399,7 +461,7 @@ export function ShareModal({ visible, recording, onClose, onCopied }: ShareModal
               </Text>
 
               <BigButton
-                title="OK"
+                title={t.confirm}
                 onPress={dismissAlert}
                 variant="primary"
                 style={styles.alertButton}

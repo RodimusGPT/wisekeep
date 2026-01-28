@@ -1,7 +1,7 @@
 // Authentication hook for WiseKeep
 // Handles anonymous auth, user profile, and usage tracking
 
-import { useEffect, useCallback } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { useAppStore, UserProfile, UsageInfo, AppConfig } from '@/store';
 import {
   signInAnonymously,
@@ -27,6 +27,17 @@ export function useAuth() {
     initDeviceId,
   } = useAppStore();
 
+  // Track mount state for async operations
+  const isMountedRef = useRef(true);
+
+  // Set up mount tracking
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   // Initialize authentication on app start
   const initAuth = useCallback(async () => {
     console.log('[Auth] initAuth started');
@@ -47,6 +58,9 @@ export function useAuth() {
       console.log('[Auth] Getting user profile...');
       const profile = await ensureUserProfile(authUserId, currentDeviceId);
       console.log('[Auth] Profile:', profile?.id, profile?.tier);
+
+      // Check if still mounted after async operation
+      if (!isMountedRef.current) return;
 
       // Transform to our UserProfile type
       const userProfile: UserProfile = {
@@ -69,6 +83,9 @@ export function useAuth() {
         getAppConfig(),
       ]);
       console.log('[Auth] Usage loaded:', usageInfo?.tier);
+
+      // Check if still mounted after async operation
+      if (!isMountedRef.current) return;
 
       // Transform comprehensive usage info (with null check)
       if (usageInfo) {
@@ -127,7 +144,10 @@ export function useAuth() {
       console.error('[Auth] Initialization error:', error);
       // On error, still mark as not loading so app can show error state
     } finally {
-      setAuthLoading(false);
+      // Only update state if still mounted
+      if (isMountedRef.current) {
+        setAuthLoading(false);
+      }
     }
   }, [initDeviceId, setUser, setAuthLoading, setUsage, setAppConfig]);
 
@@ -137,6 +157,9 @@ export function useAuth() {
 
     try {
       const usageInfo = await checkComprehensiveUsage(user.id);
+
+      // Check if still mounted after async operation
+      if (!isMountedRef.current) return;
 
       // Null check before transformation
       if (!usageInfo) {
@@ -179,7 +202,8 @@ export function useAuth() {
     try {
       const result = await redeemCode(user.id, code);
 
-      if (result.success) {
+      // Only update state if still mounted after async operation
+      if (result.success && isMountedRef.current) {
         // Update local user tier
         updateUserTier('vip');
         // Refresh usage to get updated limits

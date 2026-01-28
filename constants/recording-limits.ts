@@ -1,13 +1,22 @@
 // Recording duration limits by tier
-// Normal users: 25 min hard limit (fits in Groq's 25MB)
+// Normal users: 20 min hard limit (fits in Groq's 25MB)
 // VIP users: Unlimited via auto-chunking every 20 minutes
+//
+// DEV: Set to 30 seconds for testing auto-chunking. Change back to 20*60 for production.
+const DEV_CHUNK_DURATION = 30; // seconds - for testing auto-chunk
+const PROD_CHUNK_DURATION = 20 * 60; // 20 minutes - for production
+
+// Toggle this for testing vs production
+const USE_DEV_DURATION = true;
+
+const CHUNK_DURATION = USE_DEV_DURATION ? DEV_CHUNK_DURATION : PROD_CHUNK_DURATION;
 
 export const RECORDING_LIMITS = {
   // Maximum single recording duration (before auto-chunk or stop)
   CHUNK_DURATION_SECONDS: {
-    free: 25 * 60,        // 25 minutes - hard limit, then stops
-    vip: 20 * 60,         // 20 minutes - auto-saves chunk, continues recording
-    premium: 20 * 60,     // 20 minutes - auto-saves chunk, continues recording
+    free: CHUNK_DURATION,   // hard limit, then stops
+    vip: CHUNK_DURATION,    // auto-saves chunk, continues recording
+    premium: CHUNK_DURATION, // auto-saves chunk, continues recording
   },
 
   // Whether tier allows multi-part recordings

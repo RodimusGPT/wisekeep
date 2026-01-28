@@ -4,6 +4,7 @@ import {
   TouchableOpacity,
   Text,
   StyleSheet,
+  Platform,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
@@ -28,7 +29,9 @@ export function TabToggle({ tabs, activeTab, onTabChange }: TabToggleProps) {
 
   const handleTabPress = (key: string) => {
     if (key !== activeTab) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      if (Platform.OS !== 'web') {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+      }
       onTabChange(key);
     }
   };

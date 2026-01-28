@@ -839,6 +839,22 @@ export async function deleteRecordingFromDb(recordingId: string): Promise<void> 
 }
 
 /**
+ * Hard delete recording from database (complete erasure - GDPR compliant)
+ * This permanently removes all data including transcripts and summaries
+ */
+export async function hardDeleteRecordingFromDb(recordingId: string): Promise<void> {
+  const { error } = await supabase
+    .from('recordings')
+    .delete()
+    .eq('id', recordingId);
+
+  if (error) {
+    console.error('Error hard-deleting recording:', error);
+    throw error;
+  }
+}
+
+/**
  * Fetch recordings from database (excludes soft-deleted recordings)
  */
 export async function fetchRecordings(userId: string): Promise<unknown[]> {

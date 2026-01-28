@@ -6,6 +6,7 @@ import {
   ViewStyle,
   TextStyle,
   View,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -13,6 +14,9 @@ import { Colors } from '@/constants/Colors';
 import { useAppStore } from '@/store';
 import { useTheme } from '@/hooks';
 import { getFontSize } from '@/types';
+
+// Type for Ionicons names
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface BigButtonProps {
   title: string;
@@ -22,7 +26,7 @@ interface BigButtonProps {
   style?: ViewStyle;
   textStyle?: TextStyle;
   size?: 'normal' | 'large';
-  icon?: string; // Ionicons name
+  icon?: IoniconsName;
 }
 
 export function BigButton({
@@ -39,7 +43,9 @@ export function BigButton({
   const textSize = useAppStore((state) => state.settings.textSize);
 
   const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
     onPress();
   };
 
@@ -107,7 +113,7 @@ export function BigButton({
       <View style={styles.content}>
         {icon && (
           <Ionicons
-            name={icon as any}
+            name={icon}
             size={size === 'large' ? 28 : 22}
             color={getTextColor()}
             style={styles.icon}

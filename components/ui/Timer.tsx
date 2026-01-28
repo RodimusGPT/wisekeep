@@ -15,11 +15,13 @@ export function Timer({ seconds, isRecording = false, label }: TimerProps) {
   const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
-  // Format time as HH:MM:SS or MM:SS
+  // Format time as HH:MM:SS or MM:SS with bounds checking
   const formatTime = (totalSeconds: number): string => {
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const secs = totalSeconds % 60;
+    // Clamp to valid range (0 to ~100 hours max)
+    const validSeconds = Math.max(0, Math.min(Math.floor(totalSeconds), 359999));
+    const hours = Math.floor(validSeconds / 3600);
+    const minutes = Math.floor((validSeconds % 3600) / 60);
+    const secs = validSeconds % 60;
 
     if (hours > 0) {
       return `${hours.toString().padStart(2, '0')}:${minutes

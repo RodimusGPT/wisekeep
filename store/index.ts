@@ -58,6 +58,12 @@ export interface AppConfig {
 }
 
 interface AppState {
+  // Recording Status (global for status indicator)
+  isRecording: boolean;
+  recordingDuration: number; // seconds
+  setIsRecording: (isRecording: boolean) => void;
+  setRecordingDuration: (duration: number) => void;
+
   // Settings
   settings: AppSettings;
   setLanguage: (language: Language) => void;
@@ -87,6 +93,7 @@ interface AppState {
   addRecording: (recording: Recording) => void;
   updateRecording: (id: string, updates: Partial<Recording>) => void;
   deleteRecording: (id: string) => void;
+  clearAllRecordings: () => void;
   getRecording: (id: string) => Recording | undefined;
   setCurrentRecordingId: (id: string | null) => void;
 
@@ -98,6 +105,12 @@ interface AppState {
 export const useAppStore = create<AppState>()(
   persist(
     (set, get) => ({
+      // Recording Status (global for status indicator)
+      isRecording: false,
+      recordingDuration: 0,
+      setIsRecording: (isRecording) => set({ isRecording }),
+      setRecordingDuration: (recordingDuration) => set({ recordingDuration }),
+
       // Settings
       settings: {
         language: 'zh-TW',
@@ -181,6 +194,9 @@ export const useAppStore = create<AppState>()(
         set((state) => ({
           recordings: state.recordings.filter((r) => r.id !== id),
         })),
+
+      clearAllRecordings: () =>
+        set({ recordings: [] }),
 
       getRecording: (id) => {
         return get().recordings.find((r) => r.id === id);

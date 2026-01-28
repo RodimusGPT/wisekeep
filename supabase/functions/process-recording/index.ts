@@ -11,6 +11,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const GROQ_MAX_FILE_SIZE_MB = 20;
 const GROQ_MAX_FILE_SIZE_BYTES = GROQ_MAX_FILE_SIZE_MB * 1024 * 1024;
 const GROQ_MAX_DURATION_SECONDS = 25 * 60; // ~25 minutes (safe estimate for 25MB)
+const GROQ_TRUNCATION_THRESHOLD = 0.7; // Warn if transcribed less than 70% of expected duration
 
 // Types
 interface AudioChunk {
@@ -732,6 +733,16 @@ async function transcribeBlobDirect(
     console.log(`[Groq Response] First segment: ${firstSegment.start?.toFixed(1)}s - ${firstSegment.end?.toFixed(1)}s`);
     console.log(`[Groq Response] Last segment: ${lastSegment.start?.toFixed(1)}s - ${lastSegment.end?.toFixed(1)}s`);
     console.log(`[Groq Response] Total transcribed time range: 0s to ${lastSegment.end?.toFixed(1)}s`);
+
+    // Detect truncation: if transcribed duration is much less than reported duration
+    if (reportedDuration && lastSegment.end) {
+      const transcribedRatio = lastSegment.end / reportedDuration;
+      if (transcribedRatio < GROQ_TRUNCATION_THRESHOLD) {
+        console.warn(`[Groq Response] ⚠️ TRUNCATION DETECTED: Only transcribed ${(transcribedRatio * 100).toFixed(0)}% of audio`);
+        console.warn(`[Groq Response] Expected ~${(reportedDuration/60).toFixed(1)} min, got ${(lastSegment.end/60).toFixed(1)} min`);
+        console.warn(`[Groq Response] This is a known Groq limitation. Consider using shorter chunks (<10 min).`);
+      }
+    }
   }
   console.log(`[Groq Response] Text length: ${result.text?.length || 0} chars`);
 
@@ -983,9 +994,15 @@ async function transcribeAllChunks(
   // Determine if we should use Google STT (VIP users with long recordings)
   const isVIP = userTier === 'vip' || userTier === 'premium';
   const isLongRecording = durationSeconds > GROQ_MAX_DURATION_SECONDS;
-  const useGoogleSTT = isVIP && isLongRecording;
+  const hasGoogleSTTKey = !!Deno.env.get("GOOGLE_CLOUD_STT_API_KEY");
 
-  if (useGoogleSTT) {
+  // Use Google STT only if: VIP + long recording + API key is configured
+  // Otherwise fall back to Groq with chunking (works for any length)
+  const useGoogleSTT = isVIP && isLongRecording && hasGoogleSTTKey;
+
+  if (isVIP && isLongRecording && !hasGoogleSTTKey) {
+    console.log(`[Transcription Strategy] VIP user with ${(durationSeconds/60).toFixed(1)} min recording - Google STT not configured, using Groq with chunking`);
+  } else if (useGoogleSTT) {
     console.log(`[Transcription Strategy] VIP user with ${(durationSeconds/60).toFixed(1)} min recording - using Google Cloud STT`);
   } else {
     console.log(`[Transcription Strategy] Using Groq Whisper (tier: ${userTier}, duration: ${(durationSeconds/60).toFixed(1)} min)`);

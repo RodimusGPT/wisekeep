@@ -4,6 +4,7 @@ import {
   View,
   Text,
   StyleSheet,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -18,6 +19,7 @@ interface SettingsItemProps {
   value?: string;
   onPress: () => void;
   showChevron?: boolean;
+  disabled?: boolean;
 }
 
 export function SettingsItem({
@@ -26,12 +28,16 @@ export function SettingsItem({
   value,
   onPress,
   showChevron = true,
+  disabled = false,
 }: SettingsItemProps) {
   const { colors } = useTheme();
   const textSize = useAppStore((state) => state.settings.textSize);
 
   const handlePress = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    if (disabled) return;
+    if (Platform.OS !== 'web') {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    }
     onPress();
   };
 
@@ -39,11 +45,12 @@ export function SettingsItem({
 
   return (
     <TouchableOpacity
-      style={[styles.container, { backgroundColor, borderBottomColor: borderColor }]}
+      style={[styles.container, { backgroundColor, borderBottomColor: borderColor }, disabled && styles.disabled]}
       onPress={handlePress}
-      activeOpacity={0.6}
+      activeOpacity={disabled ? 1 : 0.6}
       accessibilityRole="button"
       accessibilityLabel={`${label}${value ? `, current value: ${value}` : ''}`}
+      accessibilityState={{ disabled }}
     >
       <Ionicons name={icon} size={24} color={Colors.primary} style={styles.icon} />
 
@@ -84,6 +91,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     minHeight: 72, // Large touch target
     borderBottomWidth: 1,
+  },
+  disabled: {
+    opacity: 0.5,
   },
   icon: {
     marginRight: 16,

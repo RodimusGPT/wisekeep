@@ -27,6 +27,16 @@ export interface SummarizationResult {
   summary: string[];
 }
 
+// Internal type for Groq API response
+interface GroqTranscriptionResponse {
+  text: string;
+  segments?: Array<{
+    start: number;
+    end: number;
+    text: string;
+  }>;
+}
+
 /**
  * Normalize audio MIME type to standard format
  * Groq API accepts: audio/webm, audio/mp4, audio/wav, audio/mpeg
@@ -106,12 +116,12 @@ export async function transcribeAudio(
     throw new Error(`Transcription failed: ${response.status} - ${errorText}`);
   }
 
-  const result = await response.json();
+  const result = await response.json() as GroqTranscriptionResponse;
   console.log('Transcription result:', result);
 
   return {
     text: result.text,
-    segments: result.segments?.map((seg: any) => ({
+    segments: result.segments?.map((seg) => ({
       start: Math.floor(seg.start * 1000), // Convert to milliseconds
       end: Math.floor(seg.end * 1000),
       text: seg.text,

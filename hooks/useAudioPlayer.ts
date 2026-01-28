@@ -14,7 +14,7 @@ interface UseAudioPlayerReturn {
   position: number; // Current position in milliseconds across all chunks
   duration: number; // Total duration in milliseconds across all chunks
   playbackSpeed: 'normal' | 'slow';
-  play: () => Promise<void>;
+  play: () => Promise<boolean>; // Returns true if playback started successfully
   pause: () => Promise<void>;
   seekTo: (positionMs: number) => Promise<void>;
   setSpeed: (speed: 'normal' | 'slow') => void;
@@ -35,6 +35,11 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   const isSwitchingChunks = useRef<boolean>(false); // Prevent race conditions during chunk switch
   const pendingSeekPosition = useRef<number | null>(null); // Store seek position during chunk load
   const isMountedRef = useRef<boolean>(true); // Track component mount status
+
+  // Explicitly set mount status on mount (important for React concurrent mode)
+  useEffect(() => {
+    isMountedRef.current = true;
+  }, []);
 
   // Use expo-audio's player hook with the current source
   const player = useExpoAudioPlayer(audioSource ? { uri: audioSource } : null);
@@ -105,11 +110,15 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
           console.log('[AudioPlayer] Resuming playback after seek');
           try {
             await player.play();
+            // Guard after async play
+            if (!isMountedRef.current) return;
           } catch (playError) {
             console.error('[AudioPlayer] Play after seek failed:', playError);
+            if (!isMountedRef.current) return;
           }
           wasPlayingBeforeChunkSwitch.current = false;
         }
+        if (!isMountedRef.current) return;
         isSwitchingChunks.current = false;
       }).catch((error) => {
         console.error('[AudioPlayer] Seek error:', error);
@@ -124,8 +133,10 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
       (async () => {
         try {
           await player.play();
+          if (!isMountedRef.current) return;
         } catch (playError) {
           console.error('[AudioPlayer] Play on new chunk failed:', playError);
+          if (!isMountedRef.current) return;
         }
         wasPlayingBeforeChunkSwitch.current = false;
         isSwitchingChunks.current = false;
@@ -141,10 +152,18 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
   useEffect(() => {
     if (isLoaded && status.duration) {
       setChunkDurations(prev => {
-        // Guard: only update if index is valid
-        if (currentChunkIndex >= prev.length) return prev;
+        // Guard: only skip if index is way beyond array bounds (more than 1 past end)
+        if (currentChunkIndex > prev.length) return prev;
+
+        // If extending array (index === length), add new entry
+        if (currentChunkIndex === prev.length) {
+          return [...prev, status.duration];
+        }
+
         // Guard: avoid unnecessary update if duration hasn't changed
         if (prev[currentChunkIndex] === status.duration) return prev;
+
+        // Update existing entry
         const newDurations = [...prev];
         newDurations[currentChunkIndex] = status.duration;
         return newDurations;
@@ -199,14 +218,14 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
     }
   }, []);
 
-  const play = useCallback(async () => {
+  const play = useCallback(async (): Promise<boolean> => {
     if (!player) {
       console.log('[AudioPlayer] Cannot play - no player');
-      return;
+      return false;
     }
     if (!isLoaded) {
       console.log('[AudioPlayer] Cannot play - audio not loaded yet');
-      return;
+      return false;
     }
 
     try {
@@ -223,14 +242,16 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
           });
         } catch (audioModeError) {
           console.warn('[AudioPlayer] Failed to configure audio mode:', audioModeError);
-          // Continue playing anyway
+          // Continue playing anyway - audio mode failure shouldn't block playback
         }
       }
 
       console.log('[AudioPlayer] Playing...');
       await player.play();
+      return true;
     } catch (error) {
       console.error('[AudioPlayer] Failed to play:', error);
+      return false;
     }
   }, [player, isLoaded]);
 
@@ -260,7 +281,8 @@ export function useAudioPlayer(): UseAudioPlayerReturn {
         for (let i = 0; i < audioChunks.length; i++) {
           // Use actual chunk duration if available, otherwise estimate equally
           let chunkDuration: number;
-          if (chunkDurations[i] > 0) {
+          // Validate bounds before accessing chunkDurations array
+          if (i < chunkDurations.length && chunkDurations[i] > 0) {
             chunkDuration = chunkDurations[i];
           } else {
             // Fallback: assume equal-length chunks (may be inaccurate)

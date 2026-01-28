@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   Pressable,
+  Platform,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { Colors } from '@/constants/Colors';
@@ -41,7 +42,9 @@ export function ConfirmDialog({
   const { card: backgroundColor, text: textColor, textSecondary: secondaryColor } = colors;
 
   const handleConfirm = () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+    if (Platform.OS !== 'web') {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(() => {});
+    }
     onConfirm();
   };
 
